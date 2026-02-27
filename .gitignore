@@ -1,0 +1,46 @@
+# Third-party / upstream code
+infini/
+
+# Model weights (too large for git)
+llm_service/models/
+
+# C++ build artifacts
+llm_service/build/
+llm_service/.xmake/
+
+# Shared libraries
+*.so
+*.dll
+*.dylib
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+llm_service/python/build/
+llm_service/python/llaisys.egg-info/
+
+# Node.js / JS / TS
+node_modules/
+dist/
+.next/
+.nuxt/
+.output/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
