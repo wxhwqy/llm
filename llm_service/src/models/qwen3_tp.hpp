@@ -53,6 +53,7 @@ struct Qwen3TPDeviceState {
     tensor_t logits;           // [1, voc] only on device 0
     tensor_t max_idx;
     tensor_t max_val;
+    tensor_t sample_workspace; // [voc] F32, only on device 0
 };
 
 class Qwen3ModelTP {
@@ -88,7 +89,9 @@ public:
     int tpSize() const { return tp_size_; }
 
     void resetCache();
-    int64_t infer(const int64_t *token_ids, size_t num_tokens);
+    int64_t infer(const int64_t *token_ids, size_t num_tokens,
+                  float temperature = 0.0f, int top_k = 0, float top_p = 1.0f,
+                  uint64_t seed = 0);
 };
 
 } // namespace llaisys::models

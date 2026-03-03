@@ -129,6 +129,7 @@ void Qwen3Model::allocateBuffers(size_t max_batch_seq) {
     logits_ = Tensor::create({1, voc}, config_.dtype, device_type_, device_id_);
     max_idx_ = Tensor::create({1}, LLAISYS_DTYPE_I64, device_type_, device_id_);
     max_val_ = Tensor::create({1}, config_.dtype, device_type_, device_id_);
+    sample_workspace_ = Tensor::create({voc}, LLAISYS_DTYPE_F32, device_type_, device_id_);
 
     // No large dequant buffer needed: linear_fp8 uses a tiny per-device tile
     // buffer in nvidia::Resource (block_h × max_K × 2 bytes, lazily allocated).
@@ -255,7 +256,9 @@ void Qwen3Model::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_pos
     ops::add(hidden_view, residual_view, mlp_view);
 }
 
-int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens) {
+int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
+                          float temperature, int top_k, float top_p,
+                          uint64_t seed) {
     core::context().setDevice(device_type_, device_id_);
 
     size_t voc = config_.vocab_size;
@@ -275,11 +278,17 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens) {
     auto normed_last = normed_->slice(0, 0, 1);
     ops::rms_norm(normed_last, last_hidden, weights_.final_norm, config_.rms_norm_eps);
 
-    // lm_head is always BF16
     ops::linear(logits_, normed_last, weights_.lm_head, nullptr);
 
     auto logits_flat = logits_->view({voc});
-    ops::argmax(max_idx_, max_val_, logits_flat);
+
+    bool use_sampling = (temperature > 0.0f) && (top_k != 1);
+    if (use_sampling) {
+        ops::sample(max_idx_, logits_flat, sample_workspace_,
+                    temperature, top_k, top_p, seed);
+    } else {
+        ops::argmax(max_idx_, max_val_, logits_flat);
+    }
 
     int64_t next_token;
     auto api = core::context().runtime().api();

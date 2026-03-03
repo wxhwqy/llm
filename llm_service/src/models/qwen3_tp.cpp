@@ -119,6 +119,7 @@ void Qwen3ModelTP::allocateDeviceState(int dev_idx) {
         d.logits = Tensor::create({1, voc}, dtype, device_type_, dev_id);
         d.max_idx = Tensor::create({1}, LLAISYS_DTYPE_I64, device_type_, dev_id);
         d.max_val = Tensor::create({1}, dtype, device_type_, dev_id);
+        d.sample_workspace = Tensor::create({voc}, LLAISYS_DTYPE_F32, device_type_, dev_id);
     }
 
     // No large dequant buffer needed.
@@ -300,7 +301,9 @@ void Qwen3ModelTP::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_p
     }
 }
 
-int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens) {
+int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens,
+                            float temperature, int top_k, float top_p,
+                            uint64_t seed) {
     size_t voc = config_.vocab_size;
     size_t start_pos = cache_len_;
 
@@ -319,7 +322,7 @@ int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens) {
         forwardLayer(layer, num_tokens, start_pos);
     }
 
-    // Final norm + lm_head + argmax on device 0
+    // Final norm + lm_head + sampling on device 0
     auto &d0 = devs_[0];
     core::context().setDevice(device_type_, d0.device_id);
 
@@ -331,7 +334,14 @@ int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens) {
     ops::linear(d0.logits, normed_view, d0.lm_head, nullptr);
 
     auto logits_flat = d0.logits->view({voc});
-    ops::argmax(d0.max_idx, d0.max_val, logits_flat);
+
+    bool use_sampling = (temperature > 0.0f) && (top_k != 1);
+    if (use_sampling) {
+        ops::sample(d0.max_idx, logits_flat, d0.sample_workspace,
+                    temperature, top_k, top_p, seed);
+    } else {
+        ops::argmax(d0.max_idx, d0.max_val, logits_flat);
+    }
 
     int64_t next_token;
     auto api = core::context().runtime().api();

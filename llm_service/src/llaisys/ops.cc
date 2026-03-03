@@ -12,6 +12,7 @@
 #include "../ops/self_attention/op.hpp"
 #include "../ops/swiglu/op.hpp"
 #include "../ops/dequantize_fp8/op.hpp"
+#include "../ops/sample/op.hpp"
 
 __C {
     void llaisysAdd(llaisysTensor_t c, llaisysTensor_t a, llaisysTensor_t b) {
@@ -43,5 +44,10 @@ __C {
     }
     void llaisysDequantizeFP8(llaisysTensor_t out_bf16, llaisysTensor_t in_fp8, llaisysTensor_t scale_inv, size_t block_h, size_t block_w) {
         llaisys::ops::dequantize_fp8(out_bf16->tensor, in_fp8->tensor, scale_inv->tensor, block_h, block_w);
+    }
+    void llaisysSample(llaisysTensor_t output_idx, llaisysTensor_t logits, llaisysTensor_t workspace,
+                       float temperature, int top_k, float top_p, uint64_t seed) {
+        llaisys::ops::sample(output_idx->tensor, logits->tensor, workspace->tensor,
+                             temperature, top_k, top_p, seed);
     }
 }

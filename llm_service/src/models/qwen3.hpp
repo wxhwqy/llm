@@ -2,6 +2,7 @@
 
 #include "../tensor/tensor.hpp"
 #include "../ops/argmax/op.hpp"
+#include "../ops/sample/op.hpp"
 #include "../ops/embedding/op.hpp"
 #include "../ops/linear/op.hpp"
 #include "../ops/rms_norm/op.hpp"
@@ -87,6 +88,7 @@ private:
     tensor_t mlp_out_;
     tensor_t logits_;
     tensor_t max_idx_, max_val_;
+    tensor_t sample_workspace_;
 
     void allocateBuffers(size_t max_batch_seq);
     void initKVCache();
@@ -104,7 +106,9 @@ public:
     const Qwen3Config &config() const { return config_; }
 
     void resetCache();
-    int64_t infer(const int64_t *token_ids, size_t num_tokens);
+    int64_t infer(const int64_t *token_ids, size_t num_tokens,
+                  float temperature = 0.0f, int top_k = 0, float top_p = 1.0f,
+                  uint64_t seed = 0);
 };
 
 } // namespace llaisys::models

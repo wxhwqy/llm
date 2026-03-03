@@ -229,6 +229,18 @@ __export int64_t llaisysQwen3ModelInfer(struct LlaisysQwen3Model *model, int64_t
     return model->model->infer(token_ids, ntoken);
 }
 
+__export int64_t llaisysQwen3ModelInferSampled(struct LlaisysQwen3Model *model, int64_t *token_ids, size_t ntoken,
+                                                float temperature, int top_k, float top_p, uint64_t seed) {
+    if (model->is_tp) {
+#ifdef ENABLE_NVIDIA_API
+        return model->tp_model->infer(token_ids, ntoken, temperature, top_k, top_p, seed);
+#else
+        return -1;
+#endif
+    }
+    return model->model->infer(token_ids, ntoken, temperature, top_k, top_p, seed);
+}
+
 __export void llaisysQwen3ModelReset(struct LlaisysQwen3Model *model) {
     if (model->is_tp) {
 #ifdef ENABLE_NVIDIA_API

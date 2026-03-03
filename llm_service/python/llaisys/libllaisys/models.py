@@ -1,5 +1,5 @@
 from ctypes import (
-    Structure, POINTER, c_size_t, c_float, c_int64, c_int, c_uint8, c_void_p
+    Structure, POINTER, c_size_t, c_float, c_int64, c_int, c_uint8, c_uint64, c_void_p
 )
 from .tensor import llaisysTensor_t
 from .llaisys_types import llaisysDataType_t, llaisysDeviceType_t
@@ -69,6 +69,11 @@ def load_models(lib):
     lib.llaisysQwen3ModelWeights.restype = POINTER(LlaisysQwen3Weights)
     lib.llaisysQwen3ModelInfer.argtypes = [LlaisysQwen3Model_p, POINTER(c_int64), c_size_t]
     lib.llaisysQwen3ModelInfer.restype = c_int64
+    lib.llaisysQwen3ModelInferSampled.argtypes = [
+        LlaisysQwen3Model_p, POINTER(c_int64), c_size_t,
+        c_float, c_int, c_float, c_uint64
+    ]
+    lib.llaisysQwen3ModelInferSampled.restype = c_int64
     lib.llaisysQwen3ModelReset.argtypes = [LlaisysQwen3Model_p]
     lib.llaisysQwen3ModelReset.restype = None
     lib.llaisysQwen3ModelTPSize.argtypes = [LlaisysQwen3Model_p]

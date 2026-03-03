@@ -48,7 +48,7 @@ class Qwen3:
         self.rms_norm_eps = config["rms_norm_eps"]
         self.rope_theta = config.get("rope_theta", 1000000.0)
         self.eos_token_id = config["eos_token_id"]
-        self.max_seq_len = min(config.get("max_position_embeddings", 131072), 4096)
+        self.max_seq_len = min(config.get("max_position_embeddings", 131072), 8192)###############
 
         quant_config = config.get("quantization_config", {})
         self.use_fp8 = quant_config.get("quant_method") == "fp8"
@@ -202,6 +202,18 @@ class Qwen3:
     def reset(self):
         LIB_LLAISYS.llaisysQwen3ModelReset(self._model)
 
+    def _infer_one(self, input_array, n, temperature, top_k, top_p, seed):
+        """Call the appropriate C infer function based on sampling params."""
+        use_sampling = (temperature > 0.0) and (top_k != 1)
+        if use_sampling:
+            return LIB_LLAISYS.llaisysQwen3ModelInferSampled(
+                self._model, input_array, n,
+                temperature, top_k, top_p, seed,
+            )
+        return LIB_LLAISYS.llaisysQwen3ModelInfer(
+            self._model, input_array, n
+        )
+
     def generate(
         self,
         inputs: Sequence[int],
@@ -210,25 +222,40 @@ class Qwen3:
         top_p: float = 0.8,
         temperature: float = 0.8,
     ):
+        """Non-streaming generate: returns full token list."""
+        return list(self.stream_generate(
+            inputs, max_new_tokens=max_new_tokens,
+            top_k=top_k, top_p=top_p, temperature=temperature,
+        ))
+
+    def stream_generate(
+        self,
+        inputs: Sequence[int],
+        max_new_tokens: int = None,
+        top_k: int = 1,
+        top_p: float = 0.8,
+        temperature: float = 0.8,
+    ):
+        """Streaming generate: yields one token id at a time."""
+        import random
         self.reset()
         tokens = list(inputs)
 
         if max_new_tokens is None:
             max_new_tokens = 128
 
+        seed_base = random.getrandbits(64)
+
         input_array = (c_int64 * len(tokens))(*tokens)
-        next_token = LIB_LLAISYS.llaisysQwen3ModelInfer(
-            self._model, input_array, len(tokens)
-        )
-        tokens.append(next_token)
+        next_token = self._infer_one(input_array, len(tokens),
+                                     temperature, top_k, top_p, seed_base)
+        yield next_token
 
-        for _ in range(max_new_tokens - 1):
+        for step in range(max_new_tokens - 1):
             if next_token == self.eos_token_id:
-                break
+                return
             input_array = (c_int64 * 1)(next_token)
-            next_token = LIB_LLAISYS.llaisysQwen3ModelInfer(
-                self._model, input_array, 1
-            )
-            tokens.append(next_token)
-
-        return tokens
+            next_token = self._infer_one(input_array, 1,
+                                         temperature, top_k, top_p,
+                                         seed_base + step + 1)
+            yield next_token

@@ -1,0 +1,161 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         String   @default("user") // "user" | "admin"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions    ChatSession[]
+  tokenUsages TokenUsage[]
+  characters  CharacterCard[]
+  worldBooks  WorldBook[]
+
+  @@index([email])
+}
+
+model CharacterCard {
+  id                 String   @id @default(cuid())
+  name               String
+  avatar             String?
+  coverImage         String?
+  description        String   @default("")
+  personality        String   @default("")
+  scenario           String   @default("")
+  systemPrompt       String   @default("")
+  firstMessage       String   @default("")
+  alternateGreetings String   @default("[]") // JSON array
+  exampleDialogue    String   @default("")
+  creatorNotes       String   @default("")
+  tags               String   @default("[]") // JSON array
+  source             String   @default("manual") // "manual" | "sillytavern_png" | "json_import"
+
+  createdBy String
+  creator   User   @relation(fields: [createdBy], references: [id])
+
+  worldBooks   CharacterWorldBook[]
+  chatSessions ChatSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([createdBy])
+}
+
+model WorldBook {
+  id              String @id @default(cuid())
+  name            String
+  description     String @default("")
+  version         String @default("1.0")
+  scope           String @default("personal") // "global" | "personal"
+  userId          String
+  user            User   @relation(fields: [userId], references: [id])
+  totalTokenCount Int    @default(0)
+
+  entries    WorldBookEntry[]
+  characters CharacterWorldBook[]
+  sessions   SessionWorldBook[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scope, userId])
+  @@index([name])
+}
+
+model WorldBookEntry {
+  id                String  @id @default(cuid())
+  worldBookId       String
+  worldBook         WorldBook @relation(fields: [worldBookId], references: [id], onDelete: Cascade)
+  keywords          String  @default("[]") // JSON array
+  secondaryKeywords String  @default("[]") // JSON array
+  content           String  @default("")
+  position          String  @default("after_system") // "before_system" | "after_system" | "before_user"
+  priority          Int     @default(0)
+  enabled           Boolean @default(true)
+  tokenCount        Int     @default(0)
+
+  @@index([worldBookId])
+}
+
+model CharacterWorldBook {
+  characterId String
+  worldBookId String
+  character   CharacterCard @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  worldBook   WorldBook     @relation(fields: [worldBookId], references: [id], onDelete: Cascade)
+
+  @@id([characterId, worldBookId])
+}
+
+model SessionWorldBook {
+  sessionId   String
+  worldBookId String
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  worldBook   WorldBook   @relation(fields: [worldBookId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, worldBookId])
+}
+
+model ChatSession {
+  id          String @id @default(cuid())
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  characterId String
+  character   CharacterCard @relation(fields: [characterId], references: [id])
+  modelId     String
+  title       String @default("")
+  usedTokens  Int    @default(0)
+  maxTokens   Int    @default(8192)
+
+  messages       ChatMessage[]
+  tokenUsages    TokenUsage[]
+  personalBooks  SessionWorldBook[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([characterId])
+}
+
+model ChatMessage {
+  id           String   @id @default(cuid())
+  sessionId    String
+  session      ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role         String   // "system" | "user" | "assistant"
+  content      String   @default("")
+  tokenCount   Int      @default(0)
+  isCompressed Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  editedAt     DateTime?
+
+  @@index([sessionId, createdAt])
+}
+
+model TokenUsage {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  sessionId        String
+  session          ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messageId        String
+  modelId          String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  createdAt        DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([sessionId])
+}
