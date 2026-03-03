@@ -24,6 +24,7 @@ class ChatCompletionRequest(BaseModel):
     top_k: int = Field(default=20, ge=0)
     max_tokens: int | None = Field(default=None, ge=1, le=131072)
     stop: list[str] | None = None
+    no_think: bool = Field(default=False, description="Disable Qwen3 thinking mode (appends /no_think)")
 
 
 # ── Response (non-streaming) ─────────────────────────────────

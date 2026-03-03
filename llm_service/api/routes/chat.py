@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import logging
 from uuid import uuid4
 
@@ -15,6 +16,31 @@ from api.services.inference import InferenceService
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _dump_request(request_id: str, body: ChatCompletionRequest) -> None:
+    """Print the full request to stderr so it's visible even if the process crashes."""
+    msgs_summary = []
+    total_chars = 0
+    for m in body.messages:
+        chars = len(m.content)
+        total_chars += chars
+        preview = m.content[:80].replace("\n", "\\n")
+        if len(m.content) > 80:
+            preview += "..."
+        msgs_summary.append(f"    [{m.role}] {chars} chars: {preview}")
+
+    text = (
+        f"\n{'='*60}\n"
+        f"[REQUEST] {request_id}\n"
+        f"  model={body.model}  stream={body.stream}  "
+        f"max_tokens={body.max_tokens}  temp={body.temperature}\n"
+        f"  messages ({len(body.messages)}), total {total_chars} chars:\n"
+        + "\n".join(msgs_summary) + "\n"
+        + f"{'='*60}\n"
+    )
+    sys.stderr.write(text)
+    sys.stderr.flush()
 
 
 def _get_inference(request: Request) -> InferenceService:
@@ -37,6 +63,7 @@ async def chat_completions(
     inference: InferenceService = Depends(_get_inference),
 ):
     request_id = f"chatcmpl-{uuid4().hex[:24]}"
+    _dump_request(request_id, body)
 
     if body.stream:
         return StreamingResponse(

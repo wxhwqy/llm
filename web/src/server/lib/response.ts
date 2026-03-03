@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AppError } from "./errors";
+import { AppError, ValidationError } from "./errors";
+import type { ZodType } from "zod";
 
 type RouteContext = { params: Promise<Record<string, string>> };
 
@@ -84,4 +85,18 @@ export function jsonCursor<T>(
   nextCursor: string | null,
 ) {
   return NextResponse.json({ data, hasMore, nextCursor });
+}
+
+/** Parse request body with a Zod schema; throws ValidationError on failure. */
+export async function validateBody<T>(req: NextRequest, schema: ZodType<T>): Promise<T> {
+  const body = await req.json();
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const details = result.error.issues.map((issue) => ({
+      field: issue.path.map(String).join("."),
+      message: issue.message,
+    }));
+    throw new ValidationError("参数校验失败", details);
+  }
+  return result.data;
 }

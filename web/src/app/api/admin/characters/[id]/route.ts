@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
-import { withAdmin, jsonOk } from "@/server/lib/response";
+import { withAdmin, jsonOk, validateBody } from "@/server/lib/response";
 import { updateCharacterSchema } from "@/server/validators/character";
 import { updateCharacter, deleteCharacter } from "@/server/services/character.service";
 import { saveUploadedFile } from "@/server/services/upload.service";
-import { ValidationError } from "@/server/lib/errors";
 
 export const PUT = withAdmin(async (req: NextRequest, ctx) => {
   const { id } = await ctx.params;
@@ -30,12 +29,8 @@ export const PUT = withAdmin(async (req: NextRequest, ctx) => {
     return jsonOk(result);
   }
 
-  const body = await req.json();
-  const data = updateCharacterSchema.safeParse(body);
-  if (!data.success) {
-    throw new ValidationError("参数校验失败", data.error.errors.map((e) => ({ field: e.path.join("."), message: e.message })));
-  }
-  const result = await updateCharacter(id, data.data);
+  const data = await validateBody(req, updateCharacterSchema);
+  const result = await updateCharacter(id, data);
   return jsonOk(result);
 });
 

@@ -68,6 +68,42 @@ class IncrementalDecoder:
         return new
 
 
+class ThinkFilter:
+    """Buffers and strips empty <think>\\n\\n</think> blocks from streamed text."""
+
+    def __init__(self):
+        self._buf = ""
+        self._done = False  # True once we've passed the think region
+
+    def feed(self, text: str) -> str:
+        if self._done:
+            return text
+
+        self._buf += text
+
+        # Still accumulating — haven't seen closing tag yet
+        if "<think>" in self._buf and "</think>" not in self._buf:
+            return ""
+
+        # Closing tag arrived (or no think tag at all)
+        if "</think>" in self._buf:
+            before, after = self._buf.split("</think>", 1)
+            thinking = before.replace("<think>", "").strip()
+            self._done = True
+            self._buf = ""
+            if thinking:
+                # Non-empty thinking: keep the whole block
+                return f"<think>\n{thinking}\n</think>{after}"
+            # Empty thinking: drop entire block, return only the part after
+            return after.lstrip("\n")
+
+        # No <think> tag at all — pass through
+        self._done = True
+        out = self._buf
+        self._buf = ""
+        return out
+
+
 class InferenceService:
     def __init__(self, model_manager: ModelManager, queue: InferenceQueue):
         self._model_manager = model_manager
@@ -85,6 +121,18 @@ class InferenceService:
         loaded = await self._model_manager.get_model(request.model)
         input_ids, prompt_tokens = self._tokenize(loaded, request)
         max_new = self._resolve_max_tokens(request, prompt_tokens, loaded)
+
+        print(
+            f"\n{'='*60}\n"
+            f"[INFERENCE] id={request_id}\n"
+            f"  model        = {request.model}\n"
+            f"  prompt_tokens= {prompt_tokens}\n"
+            f"  max_new      = {max_new}\n"
+            f"  seq_limit    = {loaded.config.max_seq_len}\n"
+            f"  remaining    = {loaded.config.max_seq_len - prompt_tokens}\n"
+            f"{'='*60}",
+            flush=True,
+        )
 
         async with self._queue.acquire():
             async for chunk in self._generate(
@@ -136,6 +184,13 @@ class InferenceService:
         self, loaded: LoadedModel, request: ChatCompletionRequest
     ) -> tuple[list[int], int]:
         messages = [m.model_dump() for m in request.messages]
+
+        if request.no_think:
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i]["role"] == "user":
+                    messages[i]["content"] = messages[i]["content"].rstrip() + " /no_think"
+                    break
+
         text = loaded.tokenizer.apply_chat_template(
             conversation=messages,
             add_generation_prompt=True,
@@ -187,6 +242,7 @@ class InferenceService:
         )
 
         decoder = IncrementalDecoder(loaded.tokenizer)
+        think_filter = ThinkFilter()
         completion_tokens = 0
         t0 = time.monotonic()
         ttft: float | None = None
@@ -214,6 +270,8 @@ class InferenceService:
                         should_stop = True
                         break
 
+                text = think_filter.feed(text)
+
                 if text:
                     yield ChatCompletionChunk(
                         id=request_id,
@@ -228,11 +286,12 @@ class InferenceService:
             elapsed = time.monotonic() - t0
             tps = completion_tokens / elapsed if elapsed > 0 else 0
 
-            logger.info(
-                "Inference complete: id=%s prompt=%d completion=%d "
-                "ttft=%.0fms total=%.1fs tps=%.1f",
-                request_id, prompt_tokens, completion_tokens,
-                (ttft or 0) * 1000, elapsed, tps,
+            print(
+                f"[DONE] id={request_id} "
+                f"prompt={prompt_tokens} completion={completion_tokens} "
+                f"ttft={((ttft or 0) * 1000):.0f}ms "
+                f"total={elapsed:.1f}s tps={tps:.1f}",
+                flush=True,
             )
 
             yield ChatCompletionChunk(

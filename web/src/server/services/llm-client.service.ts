@@ -63,6 +63,7 @@ export async function streamChatCompletion(
         model: modelId,
         messages,
         stream: true,
+        no_think: true,
         temperature: config.defaultTemperature,
         top_p: 0.95,
         max_tokens: config.defaultMaxTokens,

@@ -41,7 +41,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { getAvatarColor, timeAgo } from "@/lib/constants";
+import { getAvatarColor, timeAgo, USE_MOCK } from "@/lib/constants";
 import { useChatStore } from "@/stores/chat-store";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import {
@@ -51,6 +51,8 @@ import {
   useWorldBooks,
 } from "@/hooks/use-queries";
 import { useUiStore } from "@/stores/ui-store";
+import { api } from "@/lib/api-client";
+import { mockApi } from "@/lib/mock-api";
 import type { ChatMessage } from "@/types/chat";
 import type { ChatSession } from "@/types/chat";
 
@@ -332,11 +334,37 @@ export default function ChatSessionPage({
 
   /* ---- handlers ---- */
 
-  const toggleWorldbook = (id: string) => {
-    setEnabledWorldbooks((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
+  const updateSession = useCallback(
+    async (patch: { modelId?: string; personalWorldBookIds?: string[] }) => {
+      if (USE_MOCK) {
+        await mockApi.updateSession(sessionId, patch);
+      } else {
+        await api.put(`/chat/sessions/${sessionId}`, patch);
+      }
+    },
+    [sessionId],
+  );
+
+  const handleModelChange = useCallback(
+    (newModel: string) => {
+      setModel(newModel);
+      updateSession({ modelId: newModel });
+    },
+    [updateSession],
+  );
+
+  const toggleWorldbook = useCallback(
+    (id: string) => {
+      setEnabledWorldbooks((prev) => {
+        const next = prev.includes(id)
+          ? prev.filter((x) => x !== id)
+          : [...prev, id];
+        updateSession({ personalWorldBookIds: next });
+        return next;
+      });
+    },
+    [updateSession],
+  );
 
   const handleSend = () => {
     if (!input.trim() || isStreaming) return;
@@ -426,7 +454,7 @@ export default function ChatSessionPage({
           {!characterName && <div className="flex-1" />}
 
           {/* Model selector */}
-          <Select value={model} onValueChange={setModel}>
+          <Select value={model} onValueChange={handleModelChange}>
             <SelectTrigger className="w-[140px] h-8 text-xs hidden sm:flex">
               <Zap className="h-3 w-3 mr-1 text-amber-400" />
               <SelectValue />

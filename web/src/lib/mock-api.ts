@@ -272,6 +272,21 @@ export const mockApi = {
     return streamingDemoText;
   },
 
+  async updateSession(
+    sessionId: string,
+    input: { modelId?: string; personalWorldBookIds?: string[]; title?: string },
+  ): Promise<ApiResponse<ChatSession>> {
+    await delay(100);
+    const s = sessions.find((s) => s.id === sessionId);
+    if (!s) throw new Error("Not found");
+    if (input.modelId !== undefined) s.modelId = input.modelId;
+    if (input.personalWorldBookIds !== undefined) s.personalWorldBookIds = input.personalWorldBookIds;
+    if (input.title !== undefined) s.title = input.title;
+    s.updatedAt = new Date().toISOString();
+    const { messages, ...rest } = s;
+    return { data: rest };
+  },
+
   // World Books
   async getWorldBooks(scope?: string): Promise<PaginatedResponse<WorldBookSummary>> {
     await delay(150);
