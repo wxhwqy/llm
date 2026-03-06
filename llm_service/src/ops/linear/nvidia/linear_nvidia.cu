@@ -90,9 +90,54 @@ void linear(std::byte *out, const std::byte *in, const std::byte *weight,
 }
 
 // ---------------------------------------------------------------------------
-// Full-matrix FP8 dequant + single cuBLAS GEMM
-// Dequantizes the entire weight [N,K] to BF16 in one kernel, then one GEMM.
-// Trades ~N*K*2 bytes of temp buffer for eliminating N/block_h kernel launches.
+// Fused FP8 dequant + GEMV for M=1 (decode).
+// Single pass: reads FP8 weight + BF16 input, dequantizes on-the-fly,
+// accumulates dot product. No temporary buffer needed.
+// Each block computes one output element out[n] = dot(dequant(weight[n,:]), in[:])
+// ---------------------------------------------------------------------------
+
+constexpr int GEMV_BLOCK = 256;
+
+__global__ void fused_fp8_gemv_kernel(
+    __nv_bfloat16 *out,
+    const __nv_fp8_e4m3 *weight,
+    const __nv_bfloat16 *in_vec,
+    const float *scale_inv,
+    size_t K, size_t block_h, size_t block_w, size_t scale_cols) {
+
+    size_t n = blockIdx.x;
+    const __nv_fp8_e4m3 *w_row = weight + n * K;
+    const float *s_row = scale_inv + (n / block_h) * scale_cols;
+
+    float sum = 0.0f;
+    for (size_t k = threadIdx.x; k < K; k += GEMV_BLOCK) {
+        float w = float(w_row[k]) * s_row[k / block_w];
+        sum += w * __bfloat162float(in_vec[k]);
+    }
+
+    // Warp reduction
+    for (int off = warpSize / 2; off > 0; off >>= 1)
+        sum += __shfl_down_sync(0xFFFFFFFF, sum, off);
+
+    __shared__ float warp_buf[GEMV_BLOCK / 32];
+    int lane = threadIdx.x & 31;
+    int warp = threadIdx.x >> 5;
+
+    if (lane == 0) warp_buf[warp] = sum;
+    __syncthreads();
+
+    if (warp == 0) {
+        constexpr int nwarps = GEMV_BLOCK / 32;
+        sum = (lane < nwarps) ? warp_buf[lane] : 0.0f;
+        for (int off = warpSize / 2; off > 0; off >>= 1)
+            sum += __shfl_down_sync(0xFFFFFFFF, sum, off);
+        if (lane == 0)
+            out[n] = __float2bfloat16(sum);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Full-matrix FP8 dequant + single cuBLAS GEMM (for M>1, prefill).
 // ---------------------------------------------------------------------------
 
 __global__ void dequant_full_kernel(
@@ -112,13 +157,25 @@ void linear_fp8(std::byte *out, const std::byte *in,
                 llaisysDataType_t compute_dtype,
                 size_t M, size_t K, size_t N,
                 size_t block_h, size_t block_w) {
+    size_t scale_cols = (K + block_w - 1) / block_w;
+
+    // M=1 fast path: fused dequant+GEMV, zero temp buffer
+    if (M == 1) {
+        fused_fp8_gemv_kernel<<<(int)N, GEMV_BLOCK>>>(
+            (__nv_bfloat16 *)out,
+            (const __nv_fp8_e4m3 *)weight_fp8,
+            (const __nv_bfloat16 *)in,
+            (const float *)scale_inv,
+            K, block_h, block_w, scale_cols);
+        CUDA_KERNEL_CHECK();
+        return;
+    }
+
+    // M>1: full dequant + single cuBLAS GEMM
     auto &res = llaisys::device::nvidia::Resource::get();
     auto handle = res.cublasHandle();
-
-    size_t scale_cols = (K + block_w - 1) / block_w;
     size_t total_elems = N * K;
 
-    // Dequant buffer: N × K × 2 bytes (BF16). Lazily grows via getTileBuffer.
     void *dequant_buf = res.getTileBuffer(total_elems * sizeof(__nv_bfloat16));
 
     int threads = 256;
@@ -130,8 +187,6 @@ void linear_fp8(std::byte *out, const std::byte *in,
         N, K, block_h, block_w, scale_cols);
     CUDA_KERNEL_CHECK();
 
-    // Single GEMM: out[M,N] = in[M,K] @ dequant_buf[N,K]^T
-    // cuBLAS col-major: C(N,M) = A(N,K) * B(K,M), A=weight, B=in
     float alpha = 1.0f, beta = 0.0f;
     CUBLAS_CHECK(cublasGemmEx(handle, CUBLAS_OP_T, CUBLAS_OP_N,
                                (int)N, (int)M, (int)K,
