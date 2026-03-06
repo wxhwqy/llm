@@ -122,7 +122,8 @@ void Qwen3ModelTP::allocateDeviceState(int dev_idx) {
         d.sample_workspace = Tensor::create({voc}, LLAISYS_DTYPE_F32, device_type_, dev_id);
     }
 
-    // No large dequant buffer needed.
+    d.decode_pos_id = Tensor::create({1}, LLAISYS_DTYPE_I64, device_type_, dev_id);
+    d.decode_input_id = Tensor::create({1}, LLAISYS_DTYPE_I64, device_type_, dev_id);
 }
 
 void Qwen3ModelTP::resetCache() {
@@ -202,10 +203,17 @@ void Qwen3ModelTP::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_p
             auto q_rope_view = d.q_rope->slice(0, 0, seq_len);
             auto k_rope_view = d.k_rope->slice(0, 0, seq_len);
 
-            auto pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
-            std::vector<int64_t> pos_data(seq_len);
-            for (size_t j = 0; j < seq_len; j++) pos_data[j] = (int64_t)(start_pos + j);
-            pos_ids->load(pos_data.data());
+            tensor_t pos_ids;
+            if (seq_len == 1) {
+                int64_t pos_val = (int64_t)start_pos;
+                d.decode_pos_id->load(&pos_val);
+                pos_ids = d.decode_pos_id;
+            } else {
+                pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
+                std::vector<int64_t> pos_data(seq_len);
+                for (size_t j = 0; j < seq_len; j++) pos_data[j] = (int64_t)(start_pos + j);
+                pos_ids->load(pos_data.data());
+            }
 
             ops::rope(q_rope_view, q_normed_view, pos_ids, config_.rope_theta);
             ops::rope(k_rope_view, k_normed_view, pos_ids, config_.rope_theta);
@@ -323,8 +331,14 @@ int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens,
             auto &d = devs_[di];
             core::context().setDevice(device_type_, d.device_id);
 
-            auto input_ids = Tensor::create({num_tokens}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
-            input_ids->load(token_ids);
+            tensor_t input_ids;
+            if (num_tokens == 1) {
+                d.decode_input_id->load(token_ids);
+                input_ids = d.decode_input_id;
+            } else {
+                input_ids = Tensor::create({num_tokens}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
+                input_ids->load(token_ids);
+            }
             auto h = d.hidden_states->slice(0, 0, num_tokens);
             ops::embedding(h, input_ids, d.embed_tokens);
         }

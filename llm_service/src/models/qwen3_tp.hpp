@@ -54,6 +54,10 @@ struct Qwen3TPDeviceState {
     tensor_t max_idx;
     tensor_t max_val;
     tensor_t sample_workspace; // [voc] F32, only on device 0
+
+    // Pre-allocated decode buffers (avoid cudaMalloc in hot path)
+    tensor_t decode_pos_id;    // [1] I64, reused every decode step
+    tensor_t decode_input_id;  // [1] I64, reused every decode step
 };
 
 class Qwen3ModelTP {

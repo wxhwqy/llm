@@ -92,6 +92,10 @@ private:
     tensor_t max_idx_, max_val_;
     tensor_t sample_workspace_;
 
+    // Pre-allocated decode buffers (avoid cudaMalloc in hot path)
+    tensor_t decode_pos_id_;
+    tensor_t decode_input_id_;
+
     void allocateBuffers(size_t max_batch_seq);
     void initKVCache();
     void forwardLayer(size_t layer_idx, size_t seq_len, size_t start_pos);

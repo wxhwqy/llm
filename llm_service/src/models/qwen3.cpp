@@ -131,8 +131,8 @@ void Qwen3Model::allocateBuffers(size_t max_batch_seq) {
     max_val_ = Tensor::create({1}, config_.dtype, device_type_, device_id_);
     sample_workspace_ = Tensor::create({voc}, LLAISYS_DTYPE_F32, device_type_, device_id_);
 
-    // No large dequant buffer needed: linear_fp8 uses a tiny per-device tile
-    // buffer in nvidia::Resource (block_h × max_K × 2 bytes, lazily allocated).
+    decode_pos_id_ = Tensor::create({1}, LLAISYS_DTYPE_I64, device_type_, device_id_);
+    decode_input_id_ = Tensor::create({1}, LLAISYS_DTYPE_I64, device_type_, device_id_);
 }
 
 void Qwen3Model::resetCache() {
@@ -210,12 +210,20 @@ void Qwen3Model::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_pos
     {
         ScopedOpTimer _t(profiler_, "rope", layer_idx);
         LLAISYS_NVTX_RANGE("rope");
-        auto pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, device_id_);
-        std::vector<int64_t> pos_data(seq_len);
-        for (size_t i = 0; i < seq_len; i++) {
-            pos_data[i] = static_cast<int64_t>(start_pos + i);
+
+        tensor_t pos_ids;
+        if (seq_len == 1) {
+            int64_t pos_val = static_cast<int64_t>(start_pos);
+            decode_pos_id_->load(&pos_val);
+            pos_ids = decode_pos_id_;
+        } else {
+            pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, device_id_);
+            std::vector<int64_t> pos_data(seq_len);
+            for (size_t i = 0; i < seq_len; i++) {
+                pos_data[i] = static_cast<int64_t>(start_pos + i);
+            }
+            pos_ids->load(pos_data.data());
         }
-        pos_ids->load(pos_data.data());
 
         ops::rope(q_rope_view, q_normed_view, pos_ids, config_.rope_theta);
         ops::rope(k_rope_view, k_normed_view, pos_ids, config_.rope_theta);
@@ -301,8 +309,14 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
     size_t voc = config_.vocab_size;
     size_t start_pos = cache_len_;
 
-    auto input_ids = Tensor::create({num_tokens}, LLAISYS_DTYPE_I64, device_type_, device_id_);
-    input_ids->load(token_ids);
+    tensor_t input_ids;
+    if (num_tokens == 1) {
+        decode_input_id_->load(token_ids);
+        input_ids = decode_input_id_;
+    } else {
+        input_ids = Tensor::create({num_tokens}, LLAISYS_DTYPE_I64, device_type_, device_id_);
+        input_ids->load(token_ids);
+    }
 
     auto hidden_view = hidden_states_->slice(0, 0, num_tokens);
 
