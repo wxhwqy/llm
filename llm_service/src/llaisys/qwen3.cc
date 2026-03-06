@@ -251,4 +251,15 @@ __export void llaisysQwen3ModelReset(struct LlaisysQwen3Model *model) {
     }
 }
 
+__export void llaisysQwen3ModelSetProfile(struct LlaisysQwen3Model *model, int enabled) {
+    bool e = (enabled != 0);
+    if (model->is_tp) {
+#ifdef ENABLE_NVIDIA_API
+        model->tp_model->profiler().setEnabled(e);
+#endif
+    } else {
+        model->model->profiler().setEnabled(e);
+    }
+}
+
 }

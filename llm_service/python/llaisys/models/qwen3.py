@@ -202,6 +202,9 @@ class Qwen3:
     def reset(self):
         LIB_LLAISYS.llaisysQwen3ModelReset(self._model)
 
+    def set_profile(self, enabled: bool):
+        LIB_LLAISYS.llaisysQwen3ModelSetProfile(self._model, 1 if enabled else 0)
+
     def _infer_one(self, input_array, n, temperature, top_k, top_p, seed):
         """Call the appropriate C infer function based on sampling params."""
         use_sampling = (temperature > 0.0) and (top_k != 1)

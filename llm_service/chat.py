@@ -40,6 +40,8 @@ def main():
                         help="System prompt")
     parser.add_argument("--no-think", action="store_true",
                         help="Add /no_think to suppress thinking")
+    parser.add_argument("--profile", action="store_true",
+                        help="Enable per-op CUDA profiling (printed to stderr)")
     parser.add_argument("--temperature", default=0.6, type=float,
                         help="Sampling temperature (0 = greedy)")
     parser.add_argument("--top-k", default=20, type=int,
@@ -69,6 +71,10 @@ def main():
     model = llaisys.models.Qwen3(model_path, device, device_ids)
     print(f"Model loaded in {time.time() - t0:.1f}s (tp={model.tp_size})\n")
 
+    if args.profile:
+        model.set_profile(True)
+        print("[Profiling enabled - per-op timing will be printed to stderr]")
+
     temp = args.temperature
     top_k = args.top_k
     top_p = args.top_p
@@ -82,6 +88,7 @@ def main():
     print("    /temp F       - set temperature (0=greedy)")
     print("    /topk N       - set top-K (1=greedy, 0=off)")
     print("    /topp F       - set top-P")
+    print("    /profile      - toggle CUDA profiling")
     print("    /quit         - exit")
     print(f"  Sampling: temp={temp}, top_k={top_k}, top_p={top_p}")
     print("=" * 60)
@@ -133,6 +140,11 @@ def main():
                 if len(cmd) > 1:
                     top_p = float(cmd[1])
                 print(f"[Top-P: {top_p}]\n")
+                continue
+            elif cmd[0] == "/profile":
+                args.profile = not args.profile
+                model.set_profile(args.profile)
+                print(f"[Profiling: {'ON' if args.profile else 'OFF'}]\n")
                 continue
 
         if args.no_think:

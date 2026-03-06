@@ -90,24 +90,21 @@ void linear(std::byte *out, const std::byte *in, const std::byte *weight,
 }
 
 // ---------------------------------------------------------------------------
-// Tiled FP8 dequant + GEMM
-// Dequantizes block_h rows of weight at a time → tiny tile buffer → cuBLAS
+// Full-matrix FP8 dequant + single cuBLAS GEMM
+// Dequantizes the entire weight [N,K] to BF16 in one kernel, then one GEMM.
+// Trades ~N*K*2 bytes of temp buffer for eliminating N/block_h kernel launches.
 // ---------------------------------------------------------------------------
 
-// Kernel: dequantize tile_rows × K FP8 weights to BF16 using block-wise scale.
-// scale_inv already points to the first scale block row for this tile.
-// Since tile_rows == block_h, all rows in the tile share the same scale row,
-// so the scale index is only column-dependent: c / block_w.
-__global__ void dequant_tile_kernel(
-    __nv_bfloat16 *out_tile, const __nv_fp8_e4m3 *in_tile,
-    const float *scale_inv,
-    size_t tile_rows, size_t K, size_t block_w) {
+__global__ void dequant_full_kernel(
+    __nv_bfloat16 *out, const __nv_fp8_e4m3 *in, const float *scale_inv,
+    size_t N, size_t K, size_t block_h, size_t block_w, size_t scale_cols) {
     size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= tile_rows * K) return;
-    size_t c = idx % K;
-    float fp8_val = float(in_tile[idx]);
-    float scale = scale_inv[c / block_w];  // all rows in tile use same scale row
-    out_tile[idx] = __float2bfloat16(fp8_val * scale);
+    if (idx >= N * K) return;
+    size_t row = idx / K;
+    size_t col = idx % K;
+    float fp8_val = float(in[idx]);
+    float scale = scale_inv[(row / block_h) * scale_cols + (col / block_w)];
+    out[idx] = __float2bfloat16(fp8_val * scale);
 }
 
 void linear_fp8(std::byte *out, const std::byte *in,
@@ -118,48 +115,32 @@ void linear_fp8(std::byte *out, const std::byte *in,
     auto &res = llaisys::device::nvidia::Resource::get();
     auto handle = res.cublasHandle();
 
-    size_t tile_n = block_h;  // one tile = one row of scale blocks
     size_t scale_cols = (K + block_w - 1) / block_w;
+    size_t total_elems = N * K;
 
-    // Tile buffer: tile_n × K × 2 bytes (BF16)
-    // e.g. 128 × 12800 × 2 = ~3.3 MB for Qwen3-32B TP=2 down_proj
-    void *tile_buf = res.getTileBuffer(tile_n * K * sizeof(__nv_bfloat16));
+    // Dequant buffer: N × K × 2 bytes (BF16). Lazily grows via getTileBuffer.
+    void *dequant_buf = res.getTileBuffer(total_elems * sizeof(__nv_bfloat16));
 
-    // compute dtype is always BF16 (Qwen3 uses BF16 compute)
-    float alpha = 1.0f, beta = 0.0f;
     int threads = 256;
+    int dq_blocks = ceil_div((int)total_elems, threads);
+    dequant_full_kernel<<<dq_blocks, threads>>>(
+        (__nv_bfloat16 *)dequant_buf,
+        (const __nv_fp8_e4m3 *)weight_fp8,
+        (const float *)scale_inv,
+        N, K, block_h, block_w, scale_cols);
+    CUDA_KERNEL_CHECK();
 
-    const __nv_fp8_e4m3 *w_fp8 = (const __nv_fp8_e4m3 *)weight_fp8;
-    const float *s_inv = (const float *)scale_inv;
-
-    for (size_t n_start = 0; n_start < N; n_start += tile_n) {
-        size_t actual_tile = (n_start + tile_n <= N) ? tile_n : (N - n_start);
-        size_t tile_elems = actual_tile * K;
-
-        // Dequantize this tile: w_fp8[n_start:n_start+actual_tile, :]
-        int dq_blocks = ceil_div((int)tile_elems, threads);
-        size_t scale_row_start = n_start / block_h;
-        dequant_tile_kernel<<<dq_blocks, threads>>>(
-            (__nv_bfloat16 *)tile_buf,
-            w_fp8 + n_start * K,
-            s_inv + scale_row_start * scale_cols,
-            actual_tile, K, block_w);
-        CUDA_KERNEL_CHECK();
-
-        // GEMM: out[M, n_start:n_start+actual_tile] = in[M,K] @ tile^T[K, actual_tile]
-        // cuBLAS col-major: C[actual_tile, M] = tile[actual_tile,K] @ in^T[K,M]
-        // out pointer offset by n_start (column offset), ldc = N (full row stride)
-        __nv_bfloat16 *out_ptr = (__nv_bfloat16 *)out + n_start;
-
-        CUBLAS_CHECK(cublasGemmEx(handle, CUBLAS_OP_T, CUBLAS_OP_N,
-                                   (int)actual_tile, (int)M, (int)K,
-                                   &alpha,
-                                   tile_buf, CUDA_R_16BF, (int)K,
-                                   in, CUDA_R_16BF, (int)K,
-                                   &beta,
-                                   out_ptr, CUDA_R_16BF, (int)N,
-                                   CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
-    }
+    // Single GEMM: out[M,N] = in[M,K] @ dequant_buf[N,K]^T
+    // cuBLAS col-major: C(N,M) = A(N,K) * B(K,M), A=weight, B=in
+    float alpha = 1.0f, beta = 0.0f;
+    CUBLAS_CHECK(cublasGemmEx(handle, CUBLAS_OP_T, CUBLAS_OP_N,
+                               (int)N, (int)M, (int)K,
+                               &alpha,
+                               dequant_buf, CUDA_R_16BF, (int)K,
+                               in, CUDA_R_16BF, (int)K,
+                               &beta,
+                               out, CUDA_R_16BF, (int)N,
+                               CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
 }
 
 } // namespace llaisys::ops::nvidia

@@ -150,6 +150,8 @@ void Qwen3Model::linearFP8(tensor_t out, tensor_t in, const Qwen3FP8Linear &fp8,
 }
 
 void Qwen3Model::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_pos) {
+    LLAISYS_NVTX_RANGE("forwardLayer");
+
     size_t hs = config_.hidden_size;
     size_t nh = config_.num_heads;
     size_t nkvh = config_.num_kv_heads;
@@ -162,103 +164,138 @@ void Qwen3Model::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_pos
     auto residual_view = residual_->slice(0, 0, seq_len);
     auto normed_view = normed_->slice(0, 0, seq_len);
 
-    // Save residual
     api->memcpy_sync(residual_view->data(), hidden_view->data(),
                      seq_len * hs * hidden_view->elementSize(), LLAISYS_MEMCPY_D2D);
 
-    // Input LayerNorm
-    ops::rms_norm(normed_view, hidden_view, weights_.input_layernorm[layer_idx], config_.rms_norm_eps);
+    {
+        ScopedOpTimer _t(profiler_, "attn_norm", layer_idx);
+        LLAISYS_NVTX_RANGE("attn_norm");
+        ops::rms_norm(normed_view, hidden_view, weights_.input_layernorm[layer_idx], config_.rms_norm_eps);
+    }
 
-    // Q, K, V projections (FP8 dequant + linear, no bias)
     auto q_view = q_out_->slice(0, 0, seq_len);
     auto k_view = k_out_->slice(0, 0, seq_len);
     auto v_view = v_out_->slice(0, 0, seq_len);
 
-    linearFP8(q_view, normed_view, weights_.q_proj[layer_idx], nh * dh, hs);
-    linearFP8(k_view, normed_view, weights_.k_proj[layer_idx], nkvh * dh, hs);
-    linearFP8(v_view, normed_view, weights_.v_proj[layer_idx], nkvh * dh, hs);
+    {
+        ScopedOpTimer _t(profiler_, "qkv_proj", layer_idx);
+        LLAISYS_NVTX_RANGE("qkv_proj");
+        linearFP8(q_view, normed_view, weights_.q_proj[layer_idx], nh * dh, hs);
+        linearFP8(k_view, normed_view, weights_.k_proj[layer_idx], nkvh * dh, hs);
+        linearFP8(v_view, normed_view, weights_.v_proj[layer_idx], nkvh * dh, hs);
+    }
 
-    // Reshape Q, K, V to [seq, heads, head_dim]
     auto q_reshaped = q_view->view({seq_len, nh, dh});
     auto k_reshaped = k_view->view({seq_len, nkvh, dh});
     auto v_reshaped = v_view->view({seq_len, nkvh, dh});
 
-    // QK-Norm: RMSNorm on each head's vector (view as 2D for rms_norm compatibility)
     auto q_normed_view = q_normed_->slice(0, 0, seq_len);
     auto k_normed_view = k_normed_->slice(0, 0, seq_len);
 
-    auto q_flat = q_reshaped->view({seq_len * nh, dh});
-    auto q_normed_flat = q_normed_view->view({seq_len * nh, dh});
-    ops::rms_norm(q_normed_flat, q_flat, weights_.q_norm_weight[layer_idx], config_.rms_norm_eps);
+    {
+        ScopedOpTimer _t(profiler_, "qk_norm", layer_idx);
+        LLAISYS_NVTX_RANGE("qk_norm");
+        auto q_flat = q_reshaped->view({seq_len * nh, dh});
+        auto q_normed_flat = q_normed_view->view({seq_len * nh, dh});
+        ops::rms_norm(q_normed_flat, q_flat, weights_.q_norm_weight[layer_idx], config_.rms_norm_eps);
 
-    auto k_flat = k_reshaped->view({seq_len * nkvh, dh});
-    auto k_normed_flat = k_normed_view->view({seq_len * nkvh, dh});
-    ops::rms_norm(k_normed_flat, k_flat, weights_.k_norm_weight[layer_idx], config_.rms_norm_eps);
+        auto k_flat = k_reshaped->view({seq_len * nkvh, dh});
+        auto k_normed_flat = k_normed_view->view({seq_len * nkvh, dh});
+        ops::rms_norm(k_normed_flat, k_flat, weights_.k_norm_weight[layer_idx], config_.rms_norm_eps);
+    }
 
-    // RoPE
     auto q_rope_view = q_rope_->slice(0, 0, seq_len);
     auto k_rope_view = k_rope_->slice(0, 0, seq_len);
 
-    auto pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, device_id_);
-    std::vector<int64_t> pos_data(seq_len);
-    for (size_t i = 0; i < seq_len; i++) {
-        pos_data[i] = static_cast<int64_t>(start_pos + i);
+    {
+        ScopedOpTimer _t(profiler_, "rope", layer_idx);
+        LLAISYS_NVTX_RANGE("rope");
+        auto pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, device_id_);
+        std::vector<int64_t> pos_data(seq_len);
+        for (size_t i = 0; i < seq_len; i++) {
+            pos_data[i] = static_cast<int64_t>(start_pos + i);
+        }
+        pos_ids->load(pos_data.data());
+
+        ops::rope(q_rope_view, q_normed_view, pos_ids, config_.rope_theta);
+        ops::rope(k_rope_view, k_normed_view, pos_ids, config_.rope_theta);
     }
-    pos_ids->load(pos_data.data());
 
-    ops::rope(q_rope_view, q_normed_view, pos_ids, config_.rope_theta);
-    ops::rope(k_rope_view, k_normed_view, pos_ids, config_.rope_theta);
+    {
+        ScopedOpTimer _t(profiler_, "kv_cache_update", layer_idx);
+        LLAISYS_NVTX_RANGE("kv_cache_update");
+        size_t kv_bytes = seq_len * nkvh * dh * q_rope_view->elementSize();
+        std::byte *k_cache_ptr = kv_cache_[layer_idx][0]->data() + start_pos * nkvh * dh * q_rope_view->elementSize();
+        std::byte *v_cache_ptr = kv_cache_[layer_idx][1]->data() + start_pos * nkvh * dh * v_reshaped->elementSize();
+        api->memcpy_sync(k_cache_ptr, k_rope_view->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
+        api->memcpy_sync(v_cache_ptr, v_reshaped->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
+    }
 
-    // KV cache update
-    size_t kv_bytes = seq_len * nkvh * dh * q_rope_view->elementSize();
-    std::byte *k_cache_ptr = kv_cache_[layer_idx][0]->data() + start_pos * nkvh * dh * q_rope_view->elementSize();
-    std::byte *v_cache_ptr = kv_cache_[layer_idx][1]->data() + start_pos * nkvh * dh * v_reshaped->elementSize();
-    api->memcpy_sync(k_cache_ptr, k_rope_view->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
-    api->memcpy_sync(v_cache_ptr, v_reshaped->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
+    {
+        ScopedOpTimer _t(profiler_, "self_attention", layer_idx);
+        LLAISYS_NVTX_RANGE("self_attention");
+        size_t total_len = start_pos + seq_len;
+        auto k_cache_view = kv_cache_[layer_idx][0]->slice(0, 0, total_len);
+        auto v_cache_view = kv_cache_[layer_idx][1]->slice(0, 0, total_len);
 
-    // Self-attention
-    size_t total_len = start_pos + seq_len;
-    auto k_cache_view = kv_cache_[layer_idx][0]->slice(0, 0, total_len);
-    auto v_cache_view = kv_cache_[layer_idx][1]->slice(0, 0, total_len);
+        auto attn_view = attn_out_->slice(0, 0, seq_len);
+        float scale = 1.0f / std::sqrt(static_cast<float>(dh));
+        ops::self_attention(attn_view, q_rope_view, k_cache_view, v_cache_view, scale);
+    }
 
-    auto attn_view = attn_out_->slice(0, 0, seq_len);
-    float scale = 1.0f / std::sqrt(static_cast<float>(dh));
-    ops::self_attention(attn_view, q_rope_view, k_cache_view, v_cache_view, scale);
+    {
+        ScopedOpTimer _t(profiler_, "o_proj", layer_idx);
+        LLAISYS_NVTX_RANGE("o_proj");
+        auto attn_view = attn_out_->slice(0, 0, seq_len);
+        auto attn_flat = attn_view->view({seq_len, hs});
+        auto o_proj_view = o_proj_out_->slice(0, 0, seq_len);
+        linearFP8(o_proj_view, attn_flat, weights_.o_proj[layer_idx], hs, nh * dh);
+    }
 
-    // Output projection
-    auto attn_flat = attn_view->view({seq_len, hs});
-    auto o_proj_view = o_proj_out_->slice(0, 0, seq_len);
-    linearFP8(o_proj_view, attn_flat, weights_.o_proj[layer_idx], hs, nh * dh);
+    ops::add(hidden_view, residual_view, o_proj_out_->slice(0, 0, seq_len));
 
-    // Residual add
-    ops::add(hidden_view, residual_view, o_proj_view);
-
-    // Save residual
     api->memcpy_sync(residual_view->data(), hidden_view->data(),
                      seq_len * hs * hidden_view->elementSize(), LLAISYS_MEMCPY_D2D);
 
-    // Post-attention LayerNorm
-    ops::rms_norm(normed_view, hidden_view, weights_.post_attn_layernorm[layer_idx], config_.rms_norm_eps);
+    {
+        ScopedOpTimer _t(profiler_, "mlp_norm", layer_idx);
+        LLAISYS_NVTX_RANGE("mlp_norm");
+        ops::rms_norm(normed_view, hidden_view, weights_.post_attn_layernorm[layer_idx], config_.rms_norm_eps);
+    }
 
-    // MLP
     auto gate_view = gate_out_->slice(0, 0, seq_len);
     auto up_view = up_out_->slice(0, 0, seq_len);
     auto mlp_view = mlp_out_->slice(0, 0, seq_len);
 
-    linearFP8(gate_view, normed_view, weights_.gate_proj[layer_idx], config_.intermediate_size, hs);
-    linearFP8(up_view, normed_view, weights_.up_proj[layer_idx], config_.intermediate_size, hs);
+    {
+        ScopedOpTimer _t(profiler_, "gate_up_proj", layer_idx);
+        LLAISYS_NVTX_RANGE("gate_up_proj");
+        linearFP8(gate_view, normed_view, weights_.gate_proj[layer_idx], config_.intermediate_size, hs);
+        linearFP8(up_view, normed_view, weights_.up_proj[layer_idx], config_.intermediate_size, hs);
+    }
 
-    ops::swiglu(gate_view, gate_view, up_view);
+    {
+        ScopedOpTimer _t(profiler_, "swiglu", layer_idx);
+        LLAISYS_NVTX_RANGE("swiglu");
+        ops::swiglu(gate_view, gate_view, up_view);
+    }
 
-    linearFP8(mlp_view, gate_view, weights_.down_proj[layer_idx], hs, config_.intermediate_size);
+    {
+        ScopedOpTimer _t(profiler_, "down_proj", layer_idx);
+        LLAISYS_NVTX_RANGE("down_proj");
+        linearFP8(mlp_view, gate_view, weights_.down_proj[layer_idx], hs, config_.intermediate_size);
+    }
 
-    // Residual add
     ops::add(hidden_view, residual_view, mlp_view);
 }
 
 int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
                           float temperature, int top_k, float top_p,
                           uint64_t seed) {
+    bool is_prefill = (num_tokens > 1);
+    LLAISYS_NVTX_RANGE(is_prefill ? "infer_prefill" : "infer_decode");
+    profiler_.beginInfer(num_tokens, is_prefill);
+
     core::context().setDevice(device_type_, device_id_);
 
     size_t voc = config_.vocab_size;
@@ -268,26 +305,43 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
     input_ids->load(token_ids);
 
     auto hidden_view = hidden_states_->slice(0, 0, num_tokens);
-    ops::embedding(hidden_view, input_ids, weights_.embed_tokens);
+
+    {
+        ScopedOpTimer _t(profiler_, "embedding", 0);
+        LLAISYS_NVTX_RANGE("embedding");
+        ops::embedding(hidden_view, input_ids, weights_.embed_tokens);
+    }
 
     for (size_t layer = 0; layer < config_.num_layers; layer++) {
         forwardLayer(layer, num_tokens, start_pos);
     }
 
-    auto last_hidden = hidden_view->slice(0, num_tokens - 1, num_tokens);
-    auto normed_last = normed_->slice(0, 0, 1);
-    ops::rms_norm(normed_last, last_hidden, weights_.final_norm, config_.rms_norm_eps);
+    {
+        ScopedOpTimer _t(profiler_, "final_norm", 0);
+        LLAISYS_NVTX_RANGE("final_norm");
+        auto last_hidden = hidden_view->slice(0, num_tokens - 1, num_tokens);
+        auto normed_last = normed_->slice(0, 0, 1);
+        ops::rms_norm(normed_last, last_hidden, weights_.final_norm, config_.rms_norm_eps);
+    }
 
-    ops::linear(logits_, normed_last, weights_.lm_head, nullptr);
+    {
+        ScopedOpTimer _t(profiler_, "lm_head", 0);
+        LLAISYS_NVTX_RANGE("lm_head");
+        auto normed_last = normed_->slice(0, 0, 1);
+        ops::linear(logits_, normed_last, weights_.lm_head, nullptr);
+    }
 
-    auto logits_flat = logits_->view({voc});
-
-    bool use_sampling = (temperature > 0.0f) && (top_k != 1);
-    if (use_sampling) {
-        ops::sample(max_idx_, logits_flat, sample_workspace_,
-                    temperature, top_k, top_p, seed);
-    } else {
-        ops::argmax(max_idx_, max_val_, logits_flat);
+    {
+        ScopedOpTimer _t(profiler_, "sampling", 0);
+        LLAISYS_NVTX_RANGE("sampling");
+        auto logits_flat = logits_->view({voc});
+        bool use_sampling = (temperature > 0.0f) && (top_k != 1);
+        if (use_sampling) {
+            ops::sample(max_idx_, logits_flat, sample_workspace_,
+                        temperature, top_k, top_p, seed);
+        } else {
+            ops::argmax(max_idx_, max_val_, logits_flat);
+        }
     }
 
     int64_t next_token;
@@ -296,6 +350,7 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
 
     cache_len_ = start_pos + num_tokens;
 
+    profiler_.endInfer();
     return next_token;
 }
 

@@ -153,96 +153,97 @@ void Qwen3ModelTP::allReduceHidden(size_t seq_len) {
 }
 
 void Qwen3ModelTP::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_pos) {
+    LLAISYS_NVTX_RANGE("forwardLayer_tp");
+
     size_t hs = config_.hidden_size;
     size_t dh = config_.head_dim;
 
     // Phase 1: Local ops on each device (QKV -> Attention -> O_proj)
-    for (int di = 0; di < tp_size_; di++) {
-        auto &d = devs_[di];
-        core::context().setDevice(device_type_, d.device_id);
-        auto api = core::context().runtime().api();
+    {
+        ScopedOpTimer _t(profiler_, "attn_local", layer_idx);
+        LLAISYS_NVTX_RANGE("attn_local");
+        for (int di = 0; di < tp_size_; di++) {
+            auto &d = devs_[di];
+            core::context().setDevice(device_type_, d.device_id);
+            auto api = core::context().runtime().api();
 
-        auto hidden_view = d.hidden_states->slice(0, 0, seq_len);
-        auto residual_view = d.residual->slice(0, 0, seq_len);
-        auto normed_view = d.normed->slice(0, 0, seq_len);
+            auto hidden_view = d.hidden_states->slice(0, 0, seq_len);
+            auto residual_view = d.residual->slice(0, 0, seq_len);
+            auto normed_view = d.normed->slice(0, 0, seq_len);
 
-        api->memcpy_sync(residual_view->data(), hidden_view->data(),
-                         seq_len * hs * hidden_view->elementSize(), LLAISYS_MEMCPY_D2D);
+            api->memcpy_sync(residual_view->data(), hidden_view->data(),
+                             seq_len * hs * hidden_view->elementSize(), LLAISYS_MEMCPY_D2D);
 
-        ops::rms_norm(normed_view, hidden_view, d.input_layernorm[layer_idx], config_.rms_norm_eps);
+            ops::rms_norm(normed_view, hidden_view, d.input_layernorm[layer_idx], config_.rms_norm_eps);
 
-        // Column-parallel QKV
-        auto q_view = d.q_out->slice(0, 0, seq_len);
-        auto k_view = d.k_out->slice(0, 0, seq_len);
-        auto v_view = d.v_out->slice(0, 0, seq_len);
+            auto q_view = d.q_out->slice(0, 0, seq_len);
+            auto k_view = d.k_out->slice(0, 0, seq_len);
+            auto v_view = d.v_out->slice(0, 0, seq_len);
 
-        linearFP8(di, q_view, normed_view, d.q_proj[layer_idx], nh_per_tp_ * dh, hs);
-        linearFP8(di, k_view, normed_view, d.k_proj[layer_idx], nkvh_per_tp_ * dh, hs);
-        linearFP8(di, v_view, normed_view, d.v_proj[layer_idx], nkvh_per_tp_ * dh, hs);
+            linearFP8(di, q_view, normed_view, d.q_proj[layer_idx], nh_per_tp_ * dh, hs);
+            linearFP8(di, k_view, normed_view, d.k_proj[layer_idx], nkvh_per_tp_ * dh, hs);
+            linearFP8(di, v_view, normed_view, d.v_proj[layer_idx], nkvh_per_tp_ * dh, hs);
 
-        // QK-Norm
-        auto q_reshaped = q_view->view({seq_len, nh_per_tp_, dh});
-        auto k_reshaped = k_view->view({seq_len, nkvh_per_tp_, dh});
-        auto v_reshaped = v_view->view({seq_len, nkvh_per_tp_, dh});
+            auto q_reshaped = q_view->view({seq_len, nh_per_tp_, dh});
+            auto k_reshaped = k_view->view({seq_len, nkvh_per_tp_, dh});
+            auto v_reshaped = v_view->view({seq_len, nkvh_per_tp_, dh});
 
-        auto q_normed_view = d.q_normed->slice(0, 0, seq_len);
-        auto k_normed_view = d.k_normed->slice(0, 0, seq_len);
+            auto q_normed_view = d.q_normed->slice(0, 0, seq_len);
+            auto k_normed_view = d.k_normed->slice(0, 0, seq_len);
 
-        auto q_flat = q_reshaped->view({seq_len * nh_per_tp_, dh});
-        auto qn_flat = q_normed_view->view({seq_len * nh_per_tp_, dh});
-        ops::rms_norm(qn_flat, q_flat, d.q_norm_weight[layer_idx], config_.rms_norm_eps);
+            auto q_flat = q_reshaped->view({seq_len * nh_per_tp_, dh});
+            auto qn_flat = q_normed_view->view({seq_len * nh_per_tp_, dh});
+            ops::rms_norm(qn_flat, q_flat, d.q_norm_weight[layer_idx], config_.rms_norm_eps);
 
-        auto k_flat = k_reshaped->view({seq_len * nkvh_per_tp_, dh});
-        auto kn_flat = k_normed_view->view({seq_len * nkvh_per_tp_, dh});
-        ops::rms_norm(kn_flat, k_flat, d.k_norm_weight[layer_idx], config_.rms_norm_eps);
+            auto k_flat = k_reshaped->view({seq_len * nkvh_per_tp_, dh});
+            auto kn_flat = k_normed_view->view({seq_len * nkvh_per_tp_, dh});
+            ops::rms_norm(kn_flat, k_flat, d.k_norm_weight[layer_idx], config_.rms_norm_eps);
 
-        // RoPE
-        auto q_rope_view = d.q_rope->slice(0, 0, seq_len);
-        auto k_rope_view = d.k_rope->slice(0, 0, seq_len);
+            auto q_rope_view = d.q_rope->slice(0, 0, seq_len);
+            auto k_rope_view = d.k_rope->slice(0, 0, seq_len);
 
-        auto pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
-        std::vector<int64_t> pos_data(seq_len);
-        for (size_t j = 0; j < seq_len; j++) pos_data[j] = (int64_t)(start_pos + j);
-        pos_ids->load(pos_data.data());
+            auto pos_ids = Tensor::create({seq_len}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
+            std::vector<int64_t> pos_data(seq_len);
+            for (size_t j = 0; j < seq_len; j++) pos_data[j] = (int64_t)(start_pos + j);
+            pos_ids->load(pos_data.data());
 
-        ops::rope(q_rope_view, q_normed_view, pos_ids, config_.rope_theta);
-        ops::rope(k_rope_view, k_normed_view, pos_ids, config_.rope_theta);
+            ops::rope(q_rope_view, q_normed_view, pos_ids, config_.rope_theta);
+            ops::rope(k_rope_view, k_normed_view, pos_ids, config_.rope_theta);
 
-        // KV cache
-        size_t kv_bytes = seq_len * nkvh_per_tp_ * dh * q_rope_view->elementSize();
-        std::byte *kc = d.kv_cache[layer_idx][0]->data() + start_pos * nkvh_per_tp_ * dh * q_rope_view->elementSize();
-        std::byte *vc = d.kv_cache[layer_idx][1]->data() + start_pos * nkvh_per_tp_ * dh * v_reshaped->elementSize();
-        api->memcpy_sync(kc, k_rope_view->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
-        api->memcpy_sync(vc, v_reshaped->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
+            size_t kv_bytes = seq_len * nkvh_per_tp_ * dh * q_rope_view->elementSize();
+            std::byte *kc = d.kv_cache[layer_idx][0]->data() + start_pos * nkvh_per_tp_ * dh * q_rope_view->elementSize();
+            std::byte *vc = d.kv_cache[layer_idx][1]->data() + start_pos * nkvh_per_tp_ * dh * v_reshaped->elementSize();
+            api->memcpy_sync(kc, k_rope_view->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
+            api->memcpy_sync(vc, v_reshaped->data(), kv_bytes, LLAISYS_MEMCPY_D2D);
 
-        // Self-attention
-        size_t total_len = start_pos + seq_len;
-        auto k_cache_view = d.kv_cache[layer_idx][0]->slice(0, 0, total_len);
-        auto v_cache_view = d.kv_cache[layer_idx][1]->slice(0, 0, total_len);
+            size_t total_len = start_pos + seq_len;
+            auto k_cache_view = d.kv_cache[layer_idx][0]->slice(0, 0, total_len);
+            auto v_cache_view = d.kv_cache[layer_idx][1]->slice(0, 0, total_len);
 
-        auto attn_view = d.attn_out->slice(0, 0, seq_len);
-        float scale = 1.0f / std::sqrt((float)dh);
-        ops::self_attention(attn_view, q_rope_view, k_cache_view, v_cache_view, scale);
+            auto attn_view = d.attn_out->slice(0, 0, seq_len);
+            float scale = 1.0f / std::sqrt((float)dh);
+            ops::self_attention(attn_view, q_rope_view, k_cache_view, v_cache_view, scale);
 
-        // Row-parallel O_proj (output goes into o_proj_out which is [seq, hs])
-        auto attn_flat = attn_view->view({seq_len, nh_per_tp_ * dh});
-        auto o_proj_view = d.o_proj_out->slice(0, 0, seq_len);
-        linearFP8(di, o_proj_view, attn_flat, d.o_proj[layer_idx], hs, nh_per_tp_ * dh);
+            auto attn_flat = attn_view->view({seq_len, nh_per_tp_ * dh});
+            auto o_proj_view = d.o_proj_out->slice(0, 0, seq_len);
+            linearFP8(di, o_proj_view, attn_flat, d.o_proj[layer_idx], hs, nh_per_tp_ * dh);
+        }
     }
 
-    // AllReduce o_proj_out -> write result into hidden_states (as partial sum)
-    // First copy o_proj_out into hidden_states for in-place AllReduce
-    for (int di = 0; di < tp_size_; di++) {
-        auto &d = devs_[di];
-        core::context().setDevice(device_type_, d.device_id);
-        auto api = core::context().runtime().api();
-        auto h = d.hidden_states->slice(0, 0, seq_len);
-        auto o = d.o_proj_out->slice(0, 0, seq_len);
-        api->memcpy_sync(h->data(), o->data(), seq_len * hs * h->elementSize(), LLAISYS_MEMCPY_D2D);
+    {
+        ScopedOpTimer _t(profiler_, "attn_allreduce", layer_idx);
+        LLAISYS_NVTX_RANGE("attn_allreduce");
+        for (int di = 0; di < tp_size_; di++) {
+            auto &d = devs_[di];
+            core::context().setDevice(device_type_, d.device_id);
+            auto api = core::context().runtime().api();
+            auto h = d.hidden_states->slice(0, 0, seq_len);
+            auto o = d.o_proj_out->slice(0, 0, seq_len);
+            api->memcpy_sync(h->data(), o->data(), seq_len * hs * h->elementSize(), LLAISYS_MEMCPY_D2D);
+        }
+        allReduceHidden(seq_len);
     }
-    allReduceHidden(seq_len);
 
-    // Residual add: hidden = residual + allreduced(o_proj)
     for (int di = 0; di < tp_size_; di++) {
         auto &d = devs_[di];
         core::context().setDevice(device_type_, d.device_id);
@@ -252,46 +253,50 @@ void Qwen3ModelTP::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_p
     }
 
     // Phase 2: MLP
-    for (int di = 0; di < tp_size_; di++) {
-        auto &d = devs_[di];
-        core::context().setDevice(device_type_, d.device_id);
-        auto api = core::context().runtime().api();
+    {
+        ScopedOpTimer _t(profiler_, "mlp_local", layer_idx);
+        LLAISYS_NVTX_RANGE("mlp_local");
+        for (int di = 0; di < tp_size_; di++) {
+            auto &d = devs_[di];
+            core::context().setDevice(device_type_, d.device_id);
+            auto api = core::context().runtime().api();
 
-        auto hidden_view = d.hidden_states->slice(0, 0, seq_len);
-        auto residual_view = d.residual->slice(0, 0, seq_len);
-        auto normed_view = d.normed->slice(0, 0, seq_len);
+            auto hidden_view = d.hidden_states->slice(0, 0, seq_len);
+            auto residual_view = d.residual->slice(0, 0, seq_len);
+            auto normed_view = d.normed->slice(0, 0, seq_len);
 
-        api->memcpy_sync(residual_view->data(), hidden_view->data(),
-                         seq_len * hs * hidden_view->elementSize(), LLAISYS_MEMCPY_D2D);
+            api->memcpy_sync(residual_view->data(), hidden_view->data(),
+                             seq_len * hs * hidden_view->elementSize(), LLAISYS_MEMCPY_D2D);
 
-        ops::rms_norm(normed_view, hidden_view, d.post_attn_layernorm[layer_idx], config_.rms_norm_eps);
+            ops::rms_norm(normed_view, hidden_view, d.post_attn_layernorm[layer_idx], config_.rms_norm_eps);
 
-        // Column-parallel gate/up
-        auto gate_view = d.gate_out->slice(0, 0, seq_len);
-        auto up_view = d.up_out->slice(0, 0, seq_len);
-        auto mlp_view = d.mlp_out->slice(0, 0, seq_len);
+            auto gate_view = d.gate_out->slice(0, 0, seq_len);
+            auto up_view = d.up_out->slice(0, 0, seq_len);
+            auto mlp_view = d.mlp_out->slice(0, 0, seq_len);
 
-        linearFP8(di, gate_view, normed_view, d.gate_proj[layer_idx], di_per_tp_, hs);
-        linearFP8(di, up_view, normed_view, d.up_proj[layer_idx], di_per_tp_, hs);
+            linearFP8(di, gate_view, normed_view, d.gate_proj[layer_idx], di_per_tp_, hs);
+            linearFP8(di, up_view, normed_view, d.up_proj[layer_idx], di_per_tp_, hs);
 
-        ops::swiglu(gate_view, gate_view, up_view);
+            ops::swiglu(gate_view, gate_view, up_view);
 
-        // Row-parallel down
-        linearFP8(di, mlp_view, gate_view, d.down_proj[layer_idx], hs, di_per_tp_);
+            linearFP8(di, mlp_view, gate_view, d.down_proj[layer_idx], hs, di_per_tp_);
+        }
     }
 
-    // AllReduce mlp_out -> hidden_states
-    for (int di = 0; di < tp_size_; di++) {
-        auto &d = devs_[di];
-        core::context().setDevice(device_type_, d.device_id);
-        auto api = core::context().runtime().api();
-        auto h = d.hidden_states->slice(0, 0, seq_len);
-        auto m = d.mlp_out->slice(0, 0, seq_len);
-        api->memcpy_sync(h->data(), m->data(), seq_len * hs * h->elementSize(), LLAISYS_MEMCPY_D2D);
+    {
+        ScopedOpTimer _t(profiler_, "mlp_allreduce", layer_idx);
+        LLAISYS_NVTX_RANGE("mlp_allreduce");
+        for (int di = 0; di < tp_size_; di++) {
+            auto &d = devs_[di];
+            core::context().setDevice(device_type_, d.device_id);
+            auto api = core::context().runtime().api();
+            auto h = d.hidden_states->slice(0, 0, seq_len);
+            auto m = d.mlp_out->slice(0, 0, seq_len);
+            api->memcpy_sync(h->data(), m->data(), seq_len * hs * h->elementSize(), LLAISYS_MEMCPY_D2D);
+        }
+        allReduceHidden(seq_len);
     }
-    allReduceHidden(seq_len);
 
-    // Residual add
     for (int di = 0; di < tp_size_; di++) {
         auto &d = devs_[di];
         core::context().setDevice(device_type_, d.device_id);
@@ -304,43 +309,61 @@ void Qwen3ModelTP::forwardLayer(size_t layer_idx, size_t seq_len, size_t start_p
 int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens,
                             float temperature, int top_k, float top_p,
                             uint64_t seed) {
+    bool is_prefill = (num_tokens > 1);
+    LLAISYS_NVTX_RANGE(is_prefill ? "infer_prefill_tp" : "infer_decode_tp");
+    profiler_.beginInfer(num_tokens, is_prefill);
+
     size_t voc = config_.vocab_size;
     size_t start_pos = cache_len_;
 
-    // Embedding on all devices (replicated)
-    for (int di = 0; di < tp_size_; di++) {
-        auto &d = devs_[di];
-        core::context().setDevice(device_type_, d.device_id);
+    {
+        ScopedOpTimer _t(profiler_, "embedding", 0);
+        LLAISYS_NVTX_RANGE("embedding");
+        for (int di = 0; di < tp_size_; di++) {
+            auto &d = devs_[di];
+            core::context().setDevice(device_type_, d.device_id);
 
-        auto input_ids = Tensor::create({num_tokens}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
-        input_ids->load(token_ids);
-        auto h = d.hidden_states->slice(0, 0, num_tokens);
-        ops::embedding(h, input_ids, d.embed_tokens);
+            auto input_ids = Tensor::create({num_tokens}, LLAISYS_DTYPE_I64, device_type_, d.device_id);
+            input_ids->load(token_ids);
+            auto h = d.hidden_states->slice(0, 0, num_tokens);
+            ops::embedding(h, input_ids, d.embed_tokens);
+        }
     }
 
     for (size_t layer = 0; layer < config_.num_layers; layer++) {
         forwardLayer(layer, num_tokens, start_pos);
     }
 
-    // Final norm + lm_head + sampling on device 0
     auto &d0 = devs_[0];
     core::context().setDevice(device_type_, d0.device_id);
 
-    auto hidden_view = d0.hidden_states->slice(0, 0, num_tokens);
-    auto last_hidden = hidden_view->slice(0, num_tokens - 1, num_tokens);
-    auto normed_view = d0.normed->slice(0, 0, 1);
-    ops::rms_norm(normed_view, last_hidden, d0.final_norm, config_.rms_norm_eps);
+    {
+        ScopedOpTimer _t(profiler_, "final_norm", 0);
+        LLAISYS_NVTX_RANGE("final_norm");
+        auto hidden_view = d0.hidden_states->slice(0, 0, num_tokens);
+        auto last_hidden = hidden_view->slice(0, num_tokens - 1, num_tokens);
+        auto normed_view = d0.normed->slice(0, 0, 1);
+        ops::rms_norm(normed_view, last_hidden, d0.final_norm, config_.rms_norm_eps);
+    }
 
-    ops::linear(d0.logits, normed_view, d0.lm_head, nullptr);
+    {
+        ScopedOpTimer _t(profiler_, "lm_head", 0);
+        LLAISYS_NVTX_RANGE("lm_head");
+        auto normed_view = d0.normed->slice(0, 0, 1);
+        ops::linear(d0.logits, normed_view, d0.lm_head, nullptr);
+    }
 
-    auto logits_flat = d0.logits->view({voc});
-
-    bool use_sampling = (temperature > 0.0f) && (top_k != 1);
-    if (use_sampling) {
-        ops::sample(d0.max_idx, logits_flat, d0.sample_workspace,
-                    temperature, top_k, top_p, seed);
-    } else {
-        ops::argmax(d0.max_idx, d0.max_val, logits_flat);
+    {
+        ScopedOpTimer _t(profiler_, "sampling", 0);
+        LLAISYS_NVTX_RANGE("sampling");
+        auto logits_flat = d0.logits->view({voc});
+        bool use_sampling = (temperature > 0.0f) && (top_k != 1);
+        if (use_sampling) {
+            ops::sample(d0.max_idx, logits_flat, d0.sample_workspace,
+                        temperature, top_k, top_p, seed);
+        } else {
+            ops::argmax(d0.max_idx, d0.max_val, logits_flat);
+        }
     }
 
     int64_t next_token;
@@ -348,6 +371,8 @@ int64_t Qwen3ModelTP::infer(const int64_t *token_ids, size_t num_tokens,
     api->memcpy_sync(&next_token, d0.max_idx->data(), sizeof(int64_t), LLAISYS_MEMCPY_D2H);
 
     cache_len_ = start_pos + num_tokens;
+
+    profiler_.endInfer();
     return next_token;
 }
 

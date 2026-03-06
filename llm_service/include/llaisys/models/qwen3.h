@@ -49,6 +49,7 @@ __C {
     __export int64_t llaisysQwen3ModelInferSampled(struct LlaisysQwen3Model *model, int64_t *token_ids, size_t ntoken,
                                                     float temperature, int top_k, float top_p, uint64_t seed);
     __export void llaisysQwen3ModelReset(struct LlaisysQwen3Model *model);
+    __export void llaisysQwen3ModelSetProfile(struct LlaisysQwen3Model *model, int enabled);
 }
 
 #endif

@@ -88,10 +88,15 @@ public:
     const Qwen3Config &config() const { return config_; }
     int tpSize() const { return tp_size_; }
 
+    InferProfiler &profiler() { return profiler_; }
+
     void resetCache();
     int64_t infer(const int64_t *token_ids, size_t num_tokens,
                   float temperature = 0.0f, int top_k = 0, float top_p = 1.0f,
                   uint64_t seed = 0);
+
+private:
+    InferProfiler profiler_;
 };
 
 } // namespace llaisys::models

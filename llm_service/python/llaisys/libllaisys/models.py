@@ -80,3 +80,5 @@ def load_models(lib):
     lib.llaisysQwen3ModelTPSize.restype = c_int
     lib.llaisysQwen3ModelTPWeights.argtypes = [LlaisysQwen3Model_p, c_int]
     lib.llaisysQwen3ModelTPWeights.restype = POINTER(LlaisysQwen3Weights)
+    lib.llaisysQwen3ModelSetProfile.argtypes = [LlaisysQwen3Model_p, c_int]
+    lib.llaisysQwen3ModelSetProfile.restype = None
