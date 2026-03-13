@@ -36,6 +36,8 @@ dist/
 .env.*
 
 # IDE
+.claude/
+.cursor/
 .vscode/
 .idea/
 *.swp
@@ -44,3 +46,5 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+llm-migration/
