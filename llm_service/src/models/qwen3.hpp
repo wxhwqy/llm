@@ -114,6 +114,9 @@ public:
     InferProfiler &profiler() { return profiler_; }
 
     void resetCache();
+    void setCacheLen(size_t len);
+    size_t cacheLen() const { return cache_len_; }
+
     int64_t infer(const int64_t *token_ids, size_t num_tokens,
                   float temperature = 0.0f, int top_k = 0, float top_p = 1.0f,
                   uint64_t seed = 0);

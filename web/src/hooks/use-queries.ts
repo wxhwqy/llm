@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { mockApi } from "@/lib/mock-api";
 import { USE_MOCK } from "@/lib/constants";
 import { api } from "@/lib/api-client";
@@ -95,6 +95,22 @@ export function useWorldBook(id: string) {
         ? mockApi.getWorldBook(id)
         : api.get<ApiResponse<WorldBookDetail>>(`/worldbooks/${id}`),
     enabled: !!id,
+  });
+}
+
+export function useCreateSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (characterId: string) =>
+      USE_MOCK
+        ? mockApi.createSession(characterId)
+        : api.post<ApiResponse<ChatSession & { messages: ChatMessage[] }>>(
+            "/chat/sessions",
+            { characterId },
+          ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chat", "sessions"] });
+    },
   });
 }
 

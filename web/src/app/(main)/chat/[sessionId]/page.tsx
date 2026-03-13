@@ -304,13 +304,18 @@ export default function ChatSessionPage({
 
   /* ---- chat stream ---- */
   const { sendMessage, stopGeneration, regenerate } =
-    useChatStream(setContextUsage);
+    useChatStream(sessionId, setContextUsage);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
+
+  /* cleanup on session switch: reset UI (don't abort — let stream finish in background) */
+  useEffect(() => {
+    useChatStore.getState().resetStream();
+  }, [sessionId]);
 
   /* sync server messages → store */
   useEffect(() => {

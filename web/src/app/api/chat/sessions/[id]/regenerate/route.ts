@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest } from "next/server";
 import { withAuth } from "@/server/lib/response";
 import { regenerateSchema } from "@/server/validators/chat";
-import { regenerateStream } from "@/server/services/chat.service";
+import { regenerateStream } from "@/server/services/chat-stream.service";
 
 export const POST = withAuth(async (req: NextRequest, ctx, user) => {
   const { id } = await ctx.params;

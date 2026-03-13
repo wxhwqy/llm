@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuth, jsonOk, validateBody } from "@/server/lib/response";
 import { editMessageSchema } from "@/server/validators/chat";
-import { editMessage } from "@/server/services/chat.service";
+import { editMessage } from "@/server/services/message.service";
 
 export const PUT = withAuth(async (req: NextRequest, ctx, user) => {
   const { id, msgId } = await ctx.params;

@@ -139,6 +139,11 @@ void Qwen3Model::resetCache() {
     cache_len_ = 0;
 }
 
+void Qwen3Model::setCacheLen(size_t len) {
+    ASSERT(len <= config_.max_seq_len, "cache_len exceeds max_seq_len");
+    cache_len_ = len;
+}
+
 void Qwen3Model::linearFP8(tensor_t out, tensor_t in, const Qwen3FP8Linear &fp8,
                             size_t rows, size_t cols) {
     if (config_.use_fp8 && fp8.scale_inv) {

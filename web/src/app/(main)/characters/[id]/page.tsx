@@ -2,6 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   MessageCircle,
@@ -14,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCharacter } from "@/hooks/use-queries";
+import { useCharacter, useCreateSession } from "@/hooks/use-queries";
 import { getCoverGradient, timeAgo } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { CharacterCard } from "@/types/character";
@@ -94,8 +95,19 @@ export default function CharacterDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const { data: characterData, isLoading, error } = useCharacter(id);
+  const createSession = useCreateSession();
   const character = characterData?.data;
+
+  const handleStartChat = () => {
+    if (createSession.isPending) return;
+    createSession.mutate(id, {
+      onSuccess: (data) => {
+        router.push(`/chat/${data.data.id}`);
+      },
+    });
+  };
 
   if (isLoading) {
     return (
@@ -189,15 +201,19 @@ export default function CharacterDetailPage({
             <div className="flex-1" />
 
             <div className="mt-6">
-              <Link href="/chat/ses_1">
-                <Button
-                  size="lg"
-                  className="w-full text-base h-12 bg-violet-600 hover:bg-violet-700"
-                >
+              <Button
+                size="lg"
+                className="w-full text-base h-12 bg-violet-600 hover:bg-violet-700"
+                onClick={handleStartChat}
+                disabled={createSession.isPending}
+              >
+                {createSession.isPending ? (
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                ) : (
                   <MessageCircle className="h-5 w-5 mr-2" />
-                  开始对话
-                </Button>
-              </Link>
+                )}
+                {createSession.isPending ? "创建中..." : "开始对话"}
+              </Button>
             </div>
           </div>
         </div>

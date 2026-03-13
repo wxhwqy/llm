@@ -272,6 +272,15 @@ export const mockApi = {
     return streamingDemoText;
   },
 
+  pushMessage(sessionId: string, message: ChatMessage): void {
+    const s = sessions.find((s) => s.id === sessionId);
+    if (s) {
+      s.messages.push(message);
+      s.lastMessage = message.content.slice(0, 50);
+      s.updatedAt = new Date().toISOString();
+    }
+  },
+
   async updateSession(
     sessionId: string,
     input: { modelId?: string; personalWorldBookIds?: string[]; title?: string },

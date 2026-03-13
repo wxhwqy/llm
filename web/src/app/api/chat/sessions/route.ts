@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuth, jsonCreated, jsonPaginated, validateBody } from "@/server/lib/response";
 import { createSessionSchema } from "@/server/validators/chat";
-import { listSessions, createSession } from "@/server/services/chat.service";
+import { listSessions, createSession } from "@/server/services/session.service";
 
 export const GET = withAuth(async (req: NextRequest, _ctx, user) => {
   const url = req.nextUrl;

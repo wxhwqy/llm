@@ -122,6 +122,8 @@ class InferenceService:
         input_ids, prompt_tokens = self._tokenize(loaded, request)
         max_new = self._resolve_max_tokens(request, prompt_tokens, loaded)
 
+        reuse_cache = request.session_id is not None
+
         print(
             f"\n{'='*60}\n"
             f"[INFERENCE] id={request_id}\n"
@@ -130,13 +132,16 @@ class InferenceService:
             f"  max_new      = {max_new}\n"
             f"  seq_limit    = {loaded.config.max_seq_len}\n"
             f"  remaining    = {loaded.config.max_seq_len - prompt_tokens}\n"
+            f"  reuse_cache  = {reuse_cache}\n"
+            f"  session_id   = {request.session_id}\n"
             f"{'='*60}",
             flush=True,
         )
 
         async with self._queue.acquire():
             async for chunk in self._generate(
-                loaded, input_ids, prompt_tokens, max_new, request, request_id
+                loaded, input_ids, prompt_tokens, max_new, request, request_id,
+                reuse_cache=reuse_cache,
             ):
                 yield chunk
 
@@ -221,6 +226,7 @@ class InferenceService:
         max_new_tokens: int,
         request: ChatCompletionRequest,
         request_id: str,
+        reuse_cache: bool = False,
     ) -> AsyncGenerator[ChatCompletionChunk, None]:
         token_q: asyncio.Queue[int | None] = asyncio.Queue()
         active = _ActiveRequest(request_id=request_id)
@@ -239,6 +245,7 @@ class InferenceService:
             token_q,
             active.cancelled,
             loop,
+            reuse_cache,
         )
 
         decoder = IncrementalDecoder(loaded.tokenizer)
@@ -329,6 +336,7 @@ class InferenceService:
         token_q: asyncio.Queue,
         cancelled: threading.Event,
         loop: asyncio.AbstractEventLoop,
+        reuse_cache: bool = False,
     ) -> None:
         """Runs in a dedicated thread — calls the synchronous engine."""
         try:
@@ -338,6 +346,7 @@ class InferenceService:
                 top_k=top_k,
                 top_p=top_p,
                 temperature=temperature,
+                reuse_cache=reuse_cache,
             ):
                 if cancelled.is_set():
                     break

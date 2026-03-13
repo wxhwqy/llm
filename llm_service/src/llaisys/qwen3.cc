@@ -251,6 +251,27 @@ __export void llaisysQwen3ModelReset(struct LlaisysQwen3Model *model) {
     }
 }
 
+__export void llaisysQwen3ModelSetCacheLen(struct LlaisysQwen3Model *model, size_t cache_len) {
+    if (model->is_tp) {
+#ifdef ENABLE_NVIDIA_API
+        model->tp_model->setCacheLen(cache_len);
+#endif
+    } else {
+        model->model->setCacheLen(cache_len);
+    }
+}
+
+__export size_t llaisysQwen3ModelGetCacheLen(struct LlaisysQwen3Model *model) {
+    if (model->is_tp) {
+#ifdef ENABLE_NVIDIA_API
+        return model->tp_model->cacheLen();
+#else
+        return 0;
+#endif
+    }
+    return model->model->cacheLen();
+}
+
 __export void llaisysQwen3ModelSetProfile(struct LlaisysQwen3Model *model, int enabled) {
     bool e = (enabled != 0);
     if (model->is_tp) {

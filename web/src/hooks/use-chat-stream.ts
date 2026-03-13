@@ -15,10 +15,18 @@ interface UseChatStreamReturn {
   regenerate: (sessionId: string) => Promise<void>;
 }
 
+/**
+ * @param activeSessionId - the sessionId currently displayed on screen.
+ *   Background streams whose sessionId differs will skip UI updates.
+ */
 export function useChatStream(
+  activeSessionId: string,
   onContextUsageUpdate?: (usage: { usedTokens: number; maxTokens: number }) => void,
 ): UseChatStreamReturn {
   const abortRef = useRef<AbortController | null>(null);
+  const activeRef = useRef(activeSessionId);
+  activeRef.current = activeSessionId;
+
   const {
     addMessage,
     replaceMessageId,
@@ -28,6 +36,9 @@ export function useChatStream(
     resetStream,
     removeLastAssistant,
   } = useChatStore.getState();
+
+  /** Whether this stream's session is still the one displayed */
+  const isActive = (sid: string) => activeRef.current === sid;
 
   const sendMessage = useCallback(
     async (sessionId: string, content: string) => {
@@ -45,13 +56,13 @@ export function useChatStream(
       addMessage(userMsg);
       setStreaming(true);
 
-      if (USE_MOCK) {
-        await simulateMockStream(tempId, userMsg);
-        return;
-      }
-
       const controller = new AbortController();
       abortRef.current = controller;
+
+      if (USE_MOCK) {
+        await simulateMockStream(sessionId, controller.signal, tempId, userMsg);
+        return;
+      }
 
       try {
         const res = await api.stream(
@@ -61,7 +72,7 @@ export function useChatStream(
         );
 
         if (!res.ok) {
-          resetStream();
+          if (isActive(sessionId)) resetStream();
           return;
         }
 
@@ -69,29 +80,34 @@ export function useChatStream(
           if ("type" in event) {
             if (event.type === "user_message") {
               const e = event as SSEUserMessageEvent;
-              replaceMessageId(tempId, e.message);
+              if (isActive(sessionId)) replaceMessageId(tempId, e.message);
             } else if (event.type === "message_complete") {
               const e = event as SSEMessageCompleteEvent;
-              finalizeStream(e.message);
-              onContextUsageUpdate?.(e.contextUsage);
+              if (isActive(sessionId)) {
+                finalizeStream(e.message);
+                onContextUsageUpdate?.(e.contextUsage);
+              } else {
+                // Stream finished in background — no UI update needed,
+                // server already persisted the message.
+              }
             } else if (event.type === "error") {
               const e = event as SSEErrorEvent;
               console.error("Stream error:", e.error);
-              resetStream();
+              if (isActive(sessionId)) resetStream();
             }
           } else if ("choices" in event) {
             const e = event as SSEChunkEvent;
             const delta = e.choices[0]?.delta?.content;
-            if (delta) appendStreamContent(delta);
+            if (delta && isActive(sessionId)) appendStreamContent(delta);
           }
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           console.error("Stream failed:", err);
         }
-        resetStream();
+        if (isActive(sessionId)) resetStream();
       } finally {
-        abortRef.current = null;
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
     [addMessage, setStreaming, replaceMessageId, finalizeStream, appendStreamContent, resetStream, onContextUsageUpdate],
@@ -107,13 +123,13 @@ export function useChatStream(
       removeLastAssistant();
       setStreaming(true);
 
-      if (USE_MOCK) {
-        await simulateMockStream();
-        return;
-      }
-
       const controller = new AbortController();
       abortRef.current = controller;
+
+      if (USE_MOCK) {
+        await simulateMockStream(sessionId, controller.signal);
+        return;
+      }
 
       try {
         const res = await api.stream(
@@ -121,43 +137,49 @@ export function useChatStream(
           {},
           controller.signal,
         );
-        if (!res.ok) { resetStream(); return; }
+        if (!res.ok) { if (isActive(sessionId)) resetStream(); return; }
 
         for await (const event of parseSSEStream(res)) {
           if ("type" in event && event.type === "message_complete") {
-            finalizeStream((event as SSEMessageCompleteEvent).message);
-            onContextUsageUpdate?.((event as SSEMessageCompleteEvent).contextUsage);
+            if (isActive(sessionId)) {
+              finalizeStream((event as SSEMessageCompleteEvent).message);
+              onContextUsageUpdate?.((event as SSEMessageCompleteEvent).contextUsage);
+            }
           } else if ("choices" in event) {
             const delta = (event as SSEChunkEvent).choices[0]?.delta?.content;
-            if (delta) appendStreamContent(delta);
+            if (delta && isActive(sessionId)) appendStreamContent(delta);
           }
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") console.error(err);
-        resetStream();
+        if (isActive(sessionId)) resetStream();
       } finally {
-        abortRef.current = null;
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
     [removeLastAssistant, setStreaming, finalizeStream, appendStreamContent, resetStream, onContextUsageUpdate],
   );
 
-  async function simulateMockStream(tempId?: string, userMsg?: ChatMessage) {
+  async function simulateMockStream(sessionId: string, signal: AbortSignal, tempId?: string, userMsg?: ChatMessage) {
     const text = mockApi.getStreamingDemoText();
-    useChatStore.setState({ streamingContent: "" });
+    if (isActive(sessionId)) useChatStore.setState({ streamingContent: "" });
 
     if (tempId && userMsg) {
-      replaceMessageId(tempId, { ...userMsg, id: `msg_${Date.now()}` });
+      const realUserMsg = { ...userMsg, id: `msg_${Date.now()}` };
+      if (isActive(sessionId)) replaceMessageId(tempId, realUserMsg);
+      mockApi.pushMessage(sessionId, realUserMsg);
     }
 
     let accumulated = "";
     for (let i = 0; i < text.length; i++) {
-      if (abortRef.current?.signal.aborted) break;
+      if (signal.aborted) break;
       accumulated += text[i];
-      useChatStore.setState({ streamingContent: accumulated });
+      if (isActive(sessionId)) useChatStore.setState({ streamingContent: accumulated });
       const d = /[\s,，。！？\n]/.test(text[i]) ? 8 : 18;
       await new Promise((r) => setTimeout(r, d));
     }
+
+    if (signal.aborted) return;
 
     const aiMsg: ChatMessage = {
       id: `msg_${Date.now()}`,
@@ -168,7 +190,10 @@ export function useChatStream(
       createdAt: new Date().toISOString(),
       editedAt: null,
     };
-    finalizeStream(aiMsg);
+    if (isActive(sessionId)) {
+      finalizeStream(aiMsg);
+    }
+    mockApi.pushMessage(sessionId, aiMsg);
   }
 
   return { sendMessage, stopGeneration, regenerate };

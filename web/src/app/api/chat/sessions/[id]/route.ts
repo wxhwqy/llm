@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuth, jsonOk, validateBody } from "@/server/lib/response";
 import { updateSessionSchema } from "@/server/validators/chat";
-import { updateSession, deleteSession } from "@/server/services/chat.service";
+import { updateSession, deleteSession } from "@/server/services/session.service";
 
 export const PUT = withAuth(async (req: NextRequest, ctx, user) => {
   const { id } = await ctx.params;

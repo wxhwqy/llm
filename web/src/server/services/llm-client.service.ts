@@ -54,6 +54,7 @@ export async function streamChatCompletion(
   messages: { role: string; content: string }[],
   modelId: string,
   signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<Response> {
   try {
     const res = await fetch(`${config.llmServiceUrl}/v1/chat/completions`, {
@@ -67,6 +68,7 @@ export async function streamChatCompletion(
         temperature: config.defaultTemperature,
         top_p: 0.95,
         max_tokens: config.defaultMaxTokens,
+        ...(sessionId && { session_id: sessionId }),
       }),
       signal,
     });

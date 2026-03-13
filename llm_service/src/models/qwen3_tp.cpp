@@ -130,6 +130,11 @@ void Qwen3ModelTP::resetCache() {
     cache_len_ = 0;
 }
 
+void Qwen3ModelTP::setCacheLen(size_t len) {
+    ASSERT(len <= config_.max_seq_len, "cache_len exceeds max_seq_len");
+    cache_len_ = len;
+}
+
 void Qwen3ModelTP::linearFP8(int dev_idx, tensor_t out, tensor_t in,
                               const Qwen3FP8Linear &fp8, size_t rows, size_t cols) {
     (void)dev_idx; (void)rows; (void)cols;

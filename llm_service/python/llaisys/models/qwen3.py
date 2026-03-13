@@ -92,6 +92,10 @@ class Qwen3:
         else:
             self._weights = LIB_LLAISYS.llaisysQwen3ModelWeights(self._model)
 
+        # KV Cache reuse state
+        self._prev_input_ids: list[int] | None = None
+        self._prev_cache_len: int = 0
+
         self._load_weights(model_path)
 
     def _load_weights(self, model_path: Path):
@@ -201,6 +205,27 @@ class Qwen3:
 
     def reset(self):
         LIB_LLAISYS.llaisysQwen3ModelReset(self._model)
+        self._prev_input_ids: list[int] | None = None
+        self._prev_cache_len: int = 0
+
+    def set_cache_len(self, length: int):
+        LIB_LLAISYS.llaisysQwen3ModelSetCacheLen(self._model, length)
+
+    def get_cache_len(self) -> int:
+        return LIB_LLAISYS.llaisysQwen3ModelGetCacheLen(self._model)
+
+    def _compute_prefix_match(self, new_ids: list[int]) -> int:
+        """Return the longest common prefix length between cached and new token IDs."""
+        if self._prev_input_ids is None or self._prev_cache_len == 0:
+            return 0
+        old_ids = self._prev_input_ids
+        max_match = min(len(old_ids), len(new_ids), self._prev_cache_len)
+        prefix_len = 0
+        for i in range(max_match):
+            if old_ids[i] != new_ids[i]:
+                break
+            prefix_len = i + 1
+        return prefix_len
 
     def set_profile(self, enabled: bool):
         LIB_LLAISYS.llaisysQwen3ModelSetProfile(self._model, 1 if enabled else 0)
@@ -224,11 +249,13 @@ class Qwen3:
         top_k: int = 1,
         top_p: float = 0.8,
         temperature: float = 0.8,
+        reuse_cache: bool = False,
     ):
         """Non-streaming generate: returns full token list."""
         return list(self.stream_generate(
             inputs, max_new_tokens=max_new_tokens,
             top_k=top_k, top_p=top_p, temperature=temperature,
+            reuse_cache=reuse_cache,
         ))
 
     def stream_generate(
@@ -238,27 +265,62 @@ class Qwen3:
         top_k: int = 1,
         top_p: float = 0.8,
         temperature: float = 0.8,
+        reuse_cache: bool = False,
     ):
-        """Streaming generate: yields one token id at a time."""
+        """Streaming generate: yields one token id at a time.
+
+        Args:
+            reuse_cache: When True, attempt to reuse the KV cache from the
+                previous call by prefix-matching token IDs. Only the new
+                (non-matching) suffix is fed through the prefill stage,
+                which dramatically reduces TTFT for multi-turn conversations.
+                Defaults to False for backward compatibility.
+        """
         import random
-        self.reset()
         tokens = list(inputs)
+
+        prefix_len = 0
+        if reuse_cache:
+            prefix_len = self._compute_prefix_match(tokens)
+
+        if prefix_len > 0:
+            # Reuse mode: roll back cache_len to the matched prefix boundary,
+            # then only prefill the new suffix tokens.
+            self.set_cache_len(prefix_len)
+            effective_input = tokens[prefix_len:]
+        else:
+            # Full reset: no reusable prefix (first turn or mismatch).
+            LIB_LLAISYS.llaisysQwen3ModelReset(self._model)
+            effective_input = tokens
 
         if max_new_tokens is None:
             max_new_tokens = 128
+        max_new_tokens = min(max_new_tokens, self.max_seq_len - len(tokens))
+        if max_new_tokens <= 0:
+            return
 
         seed_base = random.getrandbits(64)
 
-        input_array = (c_int64 * len(tokens))(*tokens)
-        next_token = self._infer_one(input_array, len(tokens),
+        # Prefill (full prompt if no reuse, or only new suffix)
+        input_array = (c_int64 * len(effective_input))(*effective_input)
+        next_token = self._infer_one(input_array, len(effective_input),
                                      temperature, top_k, top_p, seed_base)
         yield next_token
 
+        # Decode
+        generated = [next_token]
         for step in range(max_new_tokens - 1):
             if next_token == self.eos_token_id:
-                return
+                break
             input_array = (c_int64 * 1)(next_token)
             next_token = self._infer_one(input_array, 1,
                                          temperature, top_k, top_p,
                                          seed_base + step + 1)
             yield next_token
+            generated.append(next_token)
+
+        # Save state for next call's prefix matching.
+        # Include generated tokens because the next turn's prompt will contain
+        # the assistant's reply (which is already in the KV cache).
+        self._prev_input_ids = tokens + generated
+        self._prev_cache_len = len(tokens) + len(generated)
