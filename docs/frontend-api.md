@@ -1,10 +1,25 @@
 # 前端 API 接口文档
 
-> 版本：0.2 | 最后更新：2026-03-03
+> 版本：0.4 | 最后更新：2026-03-14
 >
 > 本文档定义前端与后台（Next.js API Routes）之间的 HTTP API 接口规范。后台再通过 OpenAI-Compatible API 与大模型服务通信（详见 `docs/llm-service-api.md`）。
 
 ---
+
+### v0.3 → v0.4 变更摘要
+
+| # | 变更 | 影响范围 |
+|---|------|----------|
+| 1 | 角色卡新增 `preset` 字段 | 角色卡详情、创建、更新、导入接口均新增此字段。列表接口不返回（大文本字段）。前端编辑页需新增 preset 输入区域 |
+| 2 | `description` / `personality` 字段语义明确化 | `description` = 角色定义（给 AI 用，进 prompt，编辑页维护）；`personality` = 角色介绍（给用户看，列表/详情页展示）。API 响应字段名不变，仅语义和用途调整 |
+| 3 | Prompt 构建顺序调整 | preset 位于 system message 最前面，优先级最高。对前端透明 |
+
+### v0.2 → v0.3 变更摘要
+
+| # | 变更 | 原因 |
+|---|------|------|
+| 1 | 后端 Service 层重构（chat.service 拆分为 session / message / chat-stream / sse-stream 四模块，新增 Repository 层） | 原 chat.service.ts 527 行，SSE 流逻辑重复，无法扩展。前端 API 接口和响应格式不变 |
+| 2 | 后端向 LLM Service 推理请求新增 `session_id` 字段（值为当前 ChatSession ID） | LLM Service 新增会话级状态管理能力（如 KV Cache 复用）。此变更对前端透明，无需修改前端代码 |
 
 ### v0.1 → v0.2 变更摘要
 
@@ -234,6 +249,7 @@ GET /api/characters/:id
     "coverImage": "/uploads/covers/chr_abc123.png",
     "description": "来自星辰学院的天才魔法少女...",
     "personality": "活泼开朗、好奇心强、善良正义、偶尔冒失",
+    "preset": "你是一个角色扮演 AI，请始终保持角色设定，用中文回复...",
     "scenario": "你在星辰学院的图书馆偶遇了正在研究禁忌魔法的艾莉丝",
     "systemPrompt": "你是艾莉丝，一个来自星辰学院的魔法少女...",
     "firstMessage": "啊！你、你看到了什么？...",
@@ -250,7 +266,17 @@ GET /api/characters/:id
 }
 ```
 
-> 详情页中 `systemPrompt`、`exampleDialogue`、`creatorNotes` 仅对管理员有意义（编辑页使用）。前端详情页只展示 `personality`、`scenario`、`firstMessage`。
+**字段语义说明**：
+
+| 字段 | 用途 | 前端使用场景 |
+|------|------|-------------|
+| `description` | 角色定义，给 AI 用（进 prompt 的角色设定段） | 管理员编辑页维护 |
+| `personality` | 角色介绍，给用户看 | 角色列表页、详情页展示 |
+| `preset` | 预设文本，进 prompt 最前面（v0.4 新增） | 管理员编辑页维护，位于编辑表单最顶部 |
+| `systemPrompt` | 角色专属系统提示词 | 管理员编辑页维护 |
+| `scenario` | 场景设定，进 prompt | 详情页展示 + 管理员编辑 |
+
+> `preset`、`systemPrompt`、`description`、`exampleDialogue`、`creatorNotes` 仅对管理员有意义（编辑页使用）。前端详情页只展示 `personality`、`scenario`、`firstMessage`。
 
 ### 3.3 创建角色卡 🔒
 
@@ -262,8 +288,9 @@ Content-Type: multipart/form-data
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | 角色名称 |
-| `description` | string | 是 | 角色简述 |
-| `personality` | string | 是 | 性格描述 |
+| `description` | string | 是 | 角色定义（给 AI 用） |
+| `personality` | string | 是 | 角色介绍（给用户看） |
+| `preset` | string | 否 | 预设文本（进 prompt 最前面，v0.4 新增） |
 | `scenario` | string | 是 | 场景设定 |
 | `systemPrompt` | string | 是 | 系统提示词 |
 | `firstMessage` | string | 是 | 开场白 |

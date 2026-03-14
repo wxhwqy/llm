@@ -23,6 +23,7 @@ const characters: CharacterCard[] = [
     id: "chr_1", name: "艾莉丝", avatar: null, coverImage: null,
     description: "来自星辰学院的天才魔法少女，性格活泼开朗，擅长光系魔法。她总是充满好奇心，喜欢探索未知的魔法领域。",
     personality: "活泼开朗、好奇心强、善良正义、偶尔冒失",
+    preset: "",
     scenario: "你在星辰学院的图书馆偶遇了正在研究禁忌魔法的艾莉丝",
     systemPrompt: "你是艾莉丝，一个来自星辰学院的魔法少女...",
     firstMessage: "啊！你、你看到了什么？我只是在研究一些...普通的魔法理论而已！才不是什么禁忌魔法呢！",
@@ -35,6 +36,7 @@ const characters: CharacterCard[] = [
     id: "chr_2", name: "零号侦探", avatar: null, coverImage: null,
     description: "赛博朋克世界中的私人侦探，冷酷寡言但内心正义。左臂为义体改造，拥有超强的数据分析能力。",
     personality: "冷酷理性、寡言少语、正义感强、对弱者温柔",
+    preset: "",
     scenario: "雨夜，一个神秘委托人来到你的破旧侦探事务所",
     systemPrompt: "你是零号侦探，赛博朋克世界中的一名私人侦探...",
     firstMessage: "*点燃一根电子烟，烟雾在全息屏幕的蓝光中缓缓升腾*\n\n...坐。说说你的麻烦。",
@@ -47,6 +49,7 @@ const characters: CharacterCard[] = [
     id: "chr_3", name: "小雪", avatar: null, coverImage: null,
     description: "温柔体贴的邻家女孩，在咖啡店打工的大学生。喜欢读书和烘焙，总是带着温暖的笑容。",
     personality: "温柔体贴、善解人意、略带天然呆、喜欢照顾人",
+    preset: "",
     scenario: "你是小雪工作的咖啡店的常客",
     systemPrompt: "你是小雪，一个在咖啡店打工的大学生...",
     firstMessage: "欢迎光临~今天的拿铁拉花是猫咪图案哦，要不要试试看？☕",
@@ -59,6 +62,7 @@ const characters: CharacterCard[] = [
     id: "chr_4", name: "暗影刺客·凯", avatar: null, coverImage: null,
     description: "暗影公会最年轻的大师级刺客，身手敏捷，精通各种暗杀技巧。表面冷酷无情，实则背负着沉重的过去。",
     personality: "沉默寡言、行动果断、表面冷漠内心脆弱",
+    preset: "",
     scenario: "你在酒馆中偶遇了一个戴着兜帽的神秘人",
     systemPrompt: "你是暗影刺客凯...",
     firstMessage: "*从阴影中走出，兜帽下露出一双锐利的银色眼瞳*\n\n...你不应该出现在这里。",
@@ -71,6 +75,7 @@ const characters: CharacterCard[] = [
     id: "chr_5", name: "Dr. Nova", avatar: null, coverImage: null,
     description: "天才科学家，专注于量子物理与时间理论。在实验室爆炸事故后获得了感知时间流速的能力，性格古怪但充满魅力。",
     personality: "天才型人格、古怪幽默、对科学充满热情、社交能力差",
+    preset: "",
     scenario: "你是Dr. Nova的新助手，第一天来到她混乱的实验室",
     systemPrompt: "你是Dr. Nova...",
     firstMessage: "哦！你就是新来的助手？太好了！快帮我扶稳这个——注意别碰那个蓝色按钮，上次有人按了之后我们的咖啡机穿越到了三天前。",
@@ -83,6 +88,7 @@ const characters: CharacterCard[] = [
     id: "chr_6", name: "龙族末裔·焰", avatar: null, coverImage: null,
     description: "远古龙族的最后一位后裔，以人类形态生活在现代都市中。拥有操控火焰的能力，正在寻找其他幸存的龙族同胞。",
     personality: "骄傲自信、对龙族历史执着、偶尔展现龙的霸气",
+    preset: "",
     scenario: "你在深夜的天台上看到一个周身围绕着微弱火焰的身影",
     systemPrompt: "你是焰，远古龙族的最后一位后裔...",
     firstMessage: "*火焰在指尖跳动，映照出金色的竖瞳*\n\n人类...你倒是胆子不小，居然不跑。",
@@ -97,7 +103,7 @@ const characters: CharacterCard[] = [
 
 const sessions: (ChatSession & { messages: ChatMessage[] })[] = [
   {
-    id: "ses_1", characterId: "chr_1", characterName: "艾莉丝", characterAvatar: null,
+    id: "ses_1", characterId: "chr_1", characterName: "艾莉丝", characterAvatar: null, characterCoverImage: null,
     modelId: "qwen3-32b", title: "图书馆的秘密研究",
     lastMessage: "嘿嘿~那个魔法阵的核心其实是...",
     personalWorldBookIds: [], contextUsage: { usedTokens: 3200, maxTokens: 8192 },
@@ -111,7 +117,7 @@ const sessions: (ChatSession & { messages: ChatMessage[] })[] = [
     ],
   },
   {
-    id: "ses_2", characterId: "chr_2", characterName: "零号侦探", characterAvatar: null,
+    id: "ses_2", characterId: "chr_2", characterName: "零号侦探", characterAvatar: null, characterCoverImage: null,
     modelId: "qwen3-32b", title: "雨夜委托",
     lastMessage: "...这件事比你想的要复杂得多。",
     personalWorldBookIds: [], contextUsage: { usedTokens: 1800, maxTokens: 8192 },
@@ -123,7 +129,7 @@ const sessions: (ChatSession & { messages: ChatMessage[] })[] = [
     ],
   },
   {
-    id: "ses_3", characterId: "chr_3", characterName: "小雪", characterAvatar: null,
+    id: "ses_3", characterId: "chr_3", characterName: "小雪", characterAvatar: null, characterCoverImage: null,
     modelId: "qwen3-32b", title: "午后咖啡时光",
     lastMessage: "明天我试试做抹茶蛋糕，给你留一块~",
     personalWorldBookIds: ["wb_4"], contextUsage: { usedTokens: 900, maxTokens: 8192 },
@@ -219,7 +225,7 @@ export const mockApi = {
     if (params?.tag?.length) {
       filtered = filtered.filter((c) => params.tag!.some((t) => c.tags.includes(t)));
     }
-    const summaries: CharacterSummary[] = filtered.map(({ id, name, avatar, coverImage, description, tags, source, createdAt, updatedAt }) => ({ id, name, avatar, coverImage, description, tags, source, createdAt, updatedAt }));
+    const summaries: CharacterSummary[] = filtered.map(({ id, name, avatar, coverImage, description, personality, tags, source, createdAt, updatedAt }) => ({ id, name, avatar, coverImage, description, personality, tags, source, createdAt, updatedAt }));
     return { data: summaries, pagination: { page: 1, pageSize: 20, total: summaries.length, totalPages: 1 } };
   },
 
@@ -234,6 +240,35 @@ export const mockApi = {
     await delay(100);
     const tags = Array.from(new Set(characters.flatMap((c) => c.tags)));
     return { data: tags };
+  },
+
+  async createCharacter(data: Omit<CharacterCard, "id" | "createdBy" | "createdAt" | "updatedAt">): Promise<ApiResponse<CharacterCard>> {
+    await delay(300);
+    const now = new Date().toISOString();
+    const card: CharacterCard = {
+      ...data,
+      id: `chr_${Date.now()}`,
+      createdBy: "usr_default",
+      createdAt: now,
+      updatedAt: now,
+    };
+    characters.unshift(card);
+    return { data: card };
+  },
+
+  async updateCharacter(id: string, data: Partial<CharacterCard>): Promise<ApiResponse<CharacterCard>> {
+    await delay(300);
+    const idx = characters.findIndex((c) => c.id === id);
+    if (idx === -1) throw new Error("Not found");
+    characters[idx] = { ...characters[idx], ...data, updatedAt: new Date().toISOString() };
+    return { data: characters[idx] };
+  },
+
+  async deleteCharacter(id: string): Promise<ApiResponse<{ deleted: true }>> {
+    await delay(200);
+    const idx = characters.findIndex((c) => c.id === id);
+    if (idx !== -1) characters.splice(idx, 1);
+    return { data: { deleted: true } };
   },
 
   // Chat
@@ -258,7 +293,7 @@ export const mockApi = {
       createdAt: new Date().toISOString(), editedAt: null,
     };
     const session = {
-      id: `ses_${Date.now()}`, characterId, characterName: char.name, characterAvatar: null,
+      id: `ses_${Date.now()}`, characterId, characterName: char.name, characterAvatar: null, characterCoverImage: char.coverImage,
       modelId: "qwen3-32b", title: "新会话", lastMessage: char.firstMessage.slice(0, 100),
       personalWorldBookIds: [] as string[], contextUsage: { usedTokens: 0, maxTokens: 8192 },
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),

@@ -178,10 +178,6 @@ export default function CharacterDetailPage({
               ))}
             </div>
 
-            <p className="text-sm text-muted-foreground mt-4 leading-relaxed">
-              {character.description}
-            </p>
-
             {character.worldBookIds.length > 0 && (
               <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
                 <BookOpen className="h-4 w-4 shrink-0" />
@@ -218,39 +214,25 @@ export default function CharacterDetailPage({
           </div>
         </div>
 
-        <Separator className="my-8" />
-
-        <div className="space-y-8 pb-8">
-          {(character.personality || character.scenario) && (
+        {character.personality && (
+          <>
+            <Separator className="my-8" />
             <section>
               <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
                 <span className="w-1 h-5 bg-violet-500 rounded-full" />
-                角色介绍
+                角色简介
               </h2>
-              <div className="space-y-4 text-sm leading-relaxed">
-                {character.personality && (
-                  <div>
-                    <h3 className="font-medium mb-1.5">性格</h3>
-                    <p className="text-muted-foreground">
-                      {character.personality}
-                    </p>
-                  </div>
-                )}
-                {character.scenario && (
-                  <div>
-                    <h3 className="font-medium mb-1.5">场景设定</h3>
-                    <p className="text-muted-foreground">
-                      {character.scenario}
-                    </p>
-                  </div>
-                )}
-              </div>
+              <div
+                className="text-sm text-muted-foreground leading-relaxed prose prose-sm prose-neutral dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                dangerouslySetInnerHTML={{ __html: character.personality }}
+              />
             </section>
-          )}
+          </>
+        )}
 
-          {character.personality || character.scenario ? <Separator /> : null}
-
-          {character.firstMessage && (
+        {character.firstMessage && (
+          <>
+            <Separator className="my-8" />
             <section>
               <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
                 <span className="w-1 h-5 bg-violet-500 rounded-full" />
@@ -260,8 +242,10 @@ export default function CharacterDetailPage({
                 {character.firstMessage}
               </div>
             </section>
-          )}
-        </div>
+          </>
+        )}
+
+        <div className="pb-8" />
       </div>
     </div>
   );

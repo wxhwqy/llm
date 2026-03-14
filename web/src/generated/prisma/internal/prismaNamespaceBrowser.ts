@@ -95,6 +95,7 @@ export const CharacterCardScalarFieldEnum = {
   coverImage: 'coverImage',
   description: 'description',
   personality: 'personality',
+  preset: 'preset',
   scenario: 'scenario',
   systemPrompt: 'systemPrompt',
   firstMessage: 'firstMessage',

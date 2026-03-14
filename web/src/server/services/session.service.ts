@@ -14,7 +14,7 @@ function formatSessionSummary(s: {
   maxTokens: number;
   createdAt: Date;
   updatedAt: Date;
-  character: { name: string; avatar: string | null };
+  character: { name: string; avatar: string | null; coverImage: string | null };
   messages: { content: string }[];
   personalBooks: { worldBookId: string }[];
 }) {
@@ -23,6 +23,7 @@ function formatSessionSummary(s: {
     characterId: s.characterId,
     characterName: s.character.name,
     characterAvatar: s.character.avatar,
+    characterCoverImage: s.character.coverImage,
     modelId: s.modelId,
     title: s.title,
     lastMessage: s.messages[0]?.content.slice(0, 100) ?? "",
@@ -93,6 +94,7 @@ export async function createSession(userId: string, characterId: string, modelId
     characterId,
     characterName: character.name,
     characterAvatar: character.avatar,
+    characterCoverImage: character.coverImage,
     modelId: session.modelId,
     title: session.title,
     lastMessage: character.firstMessage?.slice(0, 100) ?? "",
@@ -122,14 +124,14 @@ export async function updateSession(
       ...(data.title !== undefined ? { title: data.title } : {}),
     },
     {
-      character: { select: { name: true, avatar: true } },
+      character: { select: { name: true, avatar: true, coverImage: true } },
       personalBooks: { select: { worldBookId: true } },
       messages: { orderBy: { createdAt: "desc" }, take: 1, select: { content: true } },
     },
   ) as unknown as {
     id: string; characterId: string; modelId: string; title: string;
     usedTokens: number; maxTokens: number; createdAt: Date; updatedAt: Date;
-    character: { name: string; avatar: string | null };
+    character: { name: string; avatar: string | null; coverImage: string | null };
     messages: { content: string }[];
     personalBooks: { worldBookId: string }[];
   };
@@ -139,6 +141,7 @@ export async function updateSession(
     characterId: updated.characterId,
     characterName: updated.character.name,
     characterAvatar: updated.character.avatar,
+    characterCoverImage: updated.character.coverImage,
     modelId: updated.modelId,
     title: updated.title,
     lastMessage: updated.messages[0]?.content.slice(0, 100) ?? "",

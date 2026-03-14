@@ -1,16 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { Search, Upload, Plus, Sparkles, Tag, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, Upload, Plus, Sparkles, Tag, FileImage, FileJson, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useCharacters, useCharacterTags } from "@/hooks/use-queries";
 import { useDebounce } from "@/hooks/use-debounce";
 import { getCoverGradient, timeAgo } from "@/lib/constants";
-import { cn } from "@/lib/utils";
+import { cn, stripHtml } from "@/lib/utils";
+import { parseCharacterPng, parseCharacterJson } from "@/lib/parse-character-file";
+import { useImportStore } from "@/stores/import-store";
 import type { CharacterSummary } from "@/types/character";
 
 function CoverImage({ character }: { character: CharacterSummary }) {
@@ -50,7 +66,7 @@ function CharacterCardItem({ character }: { character: CharacterSummary }) {
       <div className="p-3.5 space-y-2">
         <h3 className="font-semibold text-base truncate">{character.name}</h3>
         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-          {character.description}
+          {stripHtml(character.personality)}
         </p>
         <div className="flex items-end gap-1">
           <div className="flex flex-wrap gap-1 flex-1 min-w-0">
@@ -90,7 +106,10 @@ function CardSkeleton() {
   );
 }
 
+type ImportType = "sillytavern_png" | "json_import";
+
 export default function CharactersPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const debouncedSearch = useDebounce(search);
@@ -103,6 +122,56 @@ export default function CharactersPage() {
 
   const characters = charactersData?.data ?? [];
   const allTags = tagsData?.data ?? [];
+
+  /* ---- import dialog state ---- */
+  const [importOpen, setImportOpen] = useState(false);
+  const [importType, setImportType] = useState<ImportType>("sillytavern_png");
+  const [importError, setImportError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const setImportData = useImportStore((s) => s.setData);
+
+  const acceptMap: Record<ImportType, string> = {
+    sillytavern_png: ".png",
+    json_import: ".json",
+  };
+
+  const handleFile = useCallback(
+    async (file: File) => {
+      setImportError("");
+      setImporting(true);
+      try {
+        const data =
+          importType === "sillytavern_png"
+            ? await parseCharacterPng(file)
+            : await parseCharacterJson(file);
+        setImportData(data);
+        setImportOpen(false);
+        router.push("/characters/new/edit");
+      } catch (err) {
+        setImportError(
+          err instanceof Error ? err.message : "文件解析失败",
+        );
+      } finally {
+        setImporting(false);
+      }
+    },
+    [importType, setImportData, router],
+  );
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+    e.target.value = "";
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) =>
@@ -121,12 +190,18 @@ export default function CharactersPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Link href="/characters/new/edit">
-              <Button variant="outline" size="sm" className="hidden sm:flex">
-                <Upload className="h-4 w-4 mr-1.5" />
-                导入
-              </Button>
-            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden sm:flex"
+              onClick={() => {
+                setImportError("");
+                setImportOpen(true);
+              }}
+            >
+              <Upload className="h-4 w-4 mr-1.5" />
+              导入
+            </Button>
             <Link href="/characters/new/edit">
               <Button size="sm" className="hidden sm:flex">
                 <Plus className="h-4 w-4 mr-1.5" />
@@ -182,6 +257,85 @@ export default function CharactersPage() {
           </div>
         )}
       </div>
+
+      {/* ---- Import Dialog ---- */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>导入角色卡</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">导入来源</label>
+              <Select
+                value={importType}
+                onValueChange={(v) => {
+                  setImportType(v as ImportType);
+                  setImportError("");
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sillytavern_png">
+                    SillyTavern PNG
+                  </SelectItem>
+                  <SelectItem value="json_import">JSON 文件</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div
+              className={cn(
+                "relative flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 transition-colors cursor-pointer",
+                dragOver
+                  ? "border-violet-500 bg-violet-500/5"
+                  : "border-muted-foreground/20 hover:border-violet-500/50",
+              )}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+            >
+              {importing ? (
+                <Loader2 className="h-8 w-8 text-violet-500 animate-spin" />
+              ) : importType === "sillytavern_png" ? (
+                <FileImage className="h-8 w-8 text-muted-foreground" />
+              ) : (
+                <FileJson className="h-8 w-8 text-muted-foreground" />
+              )}
+              <div className="text-center">
+                <p className="text-sm font-medium">
+                  {importing
+                    ? "解析中..."
+                    : importType === "sillytavern_png"
+                      ? "上传 SillyTavern PNG 角色卡"
+                      : "上传 JSON 角色文件"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  点击选择文件或拖拽到此处
+                </p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={acceptMap[importType]}
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
+
+            {importError && (
+              <p className="text-sm text-destructive">{importError}</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

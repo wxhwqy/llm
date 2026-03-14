@@ -41,6 +41,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { getAvatarColor, timeAgo, USE_MOCK } from "@/lib/constants";
 import { useChatStore } from "@/stores/chat-store";
 import { useChatStream } from "@/hooks/use-chat-stream";
@@ -55,6 +56,50 @@ import { api } from "@/lib/api-client";
 import { mockApi } from "@/lib/mock-api";
 import type { ChatMessage } from "@/types/chat";
 import type { ChatSession } from "@/types/chat";
+
+/* ------------------------------------------------------------------ */
+/*  CharacterAvatar                                                   */
+/* ------------------------------------------------------------------ */
+
+function CharacterAvatar({
+  characterId,
+  characterName,
+  coverImage,
+  size = "sm",
+  clickable = false,
+}: {
+  characterId: string;
+  characterName: string;
+  coverImage?: string | null;
+  size?: "sm" | "md";
+  clickable?: boolean;
+}) {
+  const router = useRouter();
+  const dim = size === "md" ? "h-9 w-9" : "h-8 w-8";
+
+  const avatar = coverImage ? (
+    <img
+      src={coverImage}
+      alt={characterName}
+      className={cn(dim, "rounded-full object-cover shrink-0", clickable && "cursor-pointer")}
+      onClick={clickable ? () => router.push(`/characters/${characterId}`) : undefined}
+    />
+  ) : (
+    <div
+      className={cn(
+        dim,
+        "rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0",
+        getAvatarColor(characterId),
+        clickable && "cursor-pointer",
+      )}
+      onClick={clickable ? () => router.push(`/characters/${characterId}`) : undefined}
+    >
+      {characterName?.[0]}
+    </div>
+  );
+
+  return avatar;
+}
 
 /* ------------------------------------------------------------------ */
 /*  SessionList                                                       */
@@ -91,14 +136,12 @@ function SessionList({
                 s.id === currentId ? "bg-accent" : "hover:bg-accent/50",
               )}
             >
-              <div
-                className={cn(
-                  "h-9 w-9 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0",
-                  getAvatarColor(s.characterId),
-                )}
-              >
-                {s.characterName[0]}
-              </div>
+              <CharacterAvatar
+                characterId={s.characterId}
+                characterName={s.characterName}
+                coverImage={s.characterCoverImage}
+                size="md"
+              />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium truncate">
@@ -128,6 +171,7 @@ function MessageBubble({
   message,
   characterName,
   characterId,
+  coverImage,
   isStreaming,
   onEdit,
   onRegenerate,
@@ -135,6 +179,7 @@ function MessageBubble({
   message: ChatMessage;
   characterName: string;
   characterId: string;
+  coverImage?: string | null;
   isStreaming?: boolean;
   onEdit?: (id: string, content: string) => void;
   onRegenerate?: (id: string) => void;
@@ -155,14 +200,12 @@ function MessageBubble({
           <User className="h-4 w-4 text-white" />
         </div>
       ) : (
-        <div
-          className={cn(
-            "h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0",
-            getAvatarColor(characterId),
-          )}
-        >
-          {characterName?.[0]}
-        </div>
+        <CharacterAvatar
+          characterId={characterId}
+          characterName={characterName}
+          coverImage={coverImage}
+          clickable
+        />
       )}
 
       <div
@@ -437,14 +480,12 @@ export default function ChatSessionPage({
 
           {characterName && (
             <>
-              <div
-                className={cn(
-                  "h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0",
-                  getAvatarColor(characterId),
-                )}
-              >
-                {characterName[0]}
-              </div>
+              <CharacterAvatar
+                characterId={characterId}
+                characterName={characterName}
+                coverImage={session?.characterCoverImage}
+                clickable
+              />
               <div className="flex-1 min-w-0">
                 <h2 className="text-sm font-semibold truncate">
                   {characterName}
@@ -561,6 +602,7 @@ export default function ChatSessionPage({
                 message={msg}
                 characterName={characterName}
                 characterId={characterId}
+                coverImage={session?.characterCoverImage}
                 onEdit={handleEdit}
                 onRegenerate={handleRegenerate}
               />
@@ -580,6 +622,7 @@ export default function ChatSessionPage({
                 }}
                 characterName={characterName}
                 characterId={characterId}
+                coverImage={session?.characterCoverImage}
                 isStreaming
               />
             )}
@@ -587,14 +630,11 @@ export default function ChatSessionPage({
             {/* Loading dots */}
             {isStreaming && !streamingContent && characterName && (
               <div className="flex gap-3">
-                <div
-                  className={cn(
-                    "h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0",
-                    getAvatarColor(characterId),
-                  )}
-                >
-                  {characterName[0]}
-                </div>
+                <CharacterAvatar
+                  characterId={characterId}
+                  characterName={characterName}
+                  coverImage={session?.characterCoverImage}
+                />
                 <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1">
                   <span className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:0ms]" />
                   <span className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />

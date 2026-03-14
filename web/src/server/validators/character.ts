@@ -13,6 +13,7 @@ export const createCharacterSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().default(""),
   personality: z.string().default(""),
+  preset: z.string().optional().default(""),
   scenario: z.string().default(""),
   systemPrompt: z.string().default(""),
   firstMessage: z.string().default(""),

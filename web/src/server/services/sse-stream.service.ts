@@ -104,6 +104,9 @@ export function createLLMStream(
         }
       }
 
+      // 去除大模型返回内容开头的换行符和空格
+      fullContent = fullContent.trimStart();
+
       if (fullContent) {
         try {
           await callbacks.onComplete?.(send, { content: fullContent, usage });

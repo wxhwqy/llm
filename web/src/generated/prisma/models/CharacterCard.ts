@@ -31,6 +31,7 @@ export type CharacterCardMinAggregateOutputType = {
   coverImage: string | null
   description: string | null
   personality: string | null
+  preset: string | null
   scenario: string | null
   systemPrompt: string | null
   firstMessage: string | null
@@ -51,6 +52,7 @@ export type CharacterCardMaxAggregateOutputType = {
   coverImage: string | null
   description: string | null
   personality: string | null
+  preset: string | null
   scenario: string | null
   systemPrompt: string | null
   firstMessage: string | null
@@ -71,6 +73,7 @@ export type CharacterCardCountAggregateOutputType = {
   coverImage: number
   description: number
   personality: number
+  preset: number
   scenario: number
   systemPrompt: number
   firstMessage: number
@@ -93,6 +96,7 @@ export type CharacterCardMinAggregateInputType = {
   coverImage?: true
   description?: true
   personality?: true
+  preset?: true
   scenario?: true
   systemPrompt?: true
   firstMessage?: true
@@ -113,6 +117,7 @@ export type CharacterCardMaxAggregateInputType = {
   coverImage?: true
   description?: true
   personality?: true
+  preset?: true
   scenario?: true
   systemPrompt?: true
   firstMessage?: true
@@ -133,6 +138,7 @@ export type CharacterCardCountAggregateInputType = {
   coverImage?: true
   description?: true
   personality?: true
+  preset?: true
   scenario?: true
   systemPrompt?: true
   firstMessage?: true
@@ -226,6 +232,7 @@ export type CharacterCardGroupByOutputType = {
   coverImage: string | null
   description: string
   personality: string
+  preset: string
   scenario: string
   systemPrompt: string
   firstMessage: string
@@ -267,6 +274,7 @@ export type CharacterCardWhereInput = {
   coverImage?: Prisma.StringNullableFilter<"CharacterCard"> | string | null
   description?: Prisma.StringFilter<"CharacterCard"> | string
   personality?: Prisma.StringFilter<"CharacterCard"> | string
+  preset?: Prisma.StringFilter<"CharacterCard"> | string
   scenario?: Prisma.StringFilter<"CharacterCard"> | string
   systemPrompt?: Prisma.StringFilter<"CharacterCard"> | string
   firstMessage?: Prisma.StringFilter<"CharacterCard"> | string
@@ -290,6 +298,7 @@ export type CharacterCardOrderByWithRelationInput = {
   coverImage?: Prisma.SortOrderInput | Prisma.SortOrder
   description?: Prisma.SortOrder
   personality?: Prisma.SortOrder
+  preset?: Prisma.SortOrder
   scenario?: Prisma.SortOrder
   systemPrompt?: Prisma.SortOrder
   firstMessage?: Prisma.SortOrder
@@ -316,6 +325,7 @@ export type CharacterCardWhereUniqueInput = Prisma.AtLeast<{
   coverImage?: Prisma.StringNullableFilter<"CharacterCard"> | string | null
   description?: Prisma.StringFilter<"CharacterCard"> | string
   personality?: Prisma.StringFilter<"CharacterCard"> | string
+  preset?: Prisma.StringFilter<"CharacterCard"> | string
   scenario?: Prisma.StringFilter<"CharacterCard"> | string
   systemPrompt?: Prisma.StringFilter<"CharacterCard"> | string
   firstMessage?: Prisma.StringFilter<"CharacterCard"> | string
@@ -339,6 +349,7 @@ export type CharacterCardOrderByWithAggregationInput = {
   coverImage?: Prisma.SortOrderInput | Prisma.SortOrder
   description?: Prisma.SortOrder
   personality?: Prisma.SortOrder
+  preset?: Prisma.SortOrder
   scenario?: Prisma.SortOrder
   systemPrompt?: Prisma.SortOrder
   firstMessage?: Prisma.SortOrder
@@ -365,6 +376,7 @@ export type CharacterCardScalarWhereWithAggregatesInput = {
   coverImage?: Prisma.StringNullableWithAggregatesFilter<"CharacterCard"> | string | null
   description?: Prisma.StringWithAggregatesFilter<"CharacterCard"> | string
   personality?: Prisma.StringWithAggregatesFilter<"CharacterCard"> | string
+  preset?: Prisma.StringWithAggregatesFilter<"CharacterCard"> | string
   scenario?: Prisma.StringWithAggregatesFilter<"CharacterCard"> | string
   systemPrompt?: Prisma.StringWithAggregatesFilter<"CharacterCard"> | string
   firstMessage?: Prisma.StringWithAggregatesFilter<"CharacterCard"> | string
@@ -385,6 +397,7 @@ export type CharacterCardCreateInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -407,6 +420,7 @@ export type CharacterCardUncheckedCreateInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -429,6 +443,7 @@ export type CharacterCardUpdateInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -451,6 +466,7 @@ export type CharacterCardUncheckedUpdateInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -473,6 +489,7 @@ export type CharacterCardCreateManyInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -493,6 +510,7 @@ export type CharacterCardUpdateManyMutationInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -512,6 +530,7 @@ export type CharacterCardUncheckedUpdateManyInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -542,6 +561,7 @@ export type CharacterCardCountOrderByAggregateInput = {
   coverImage?: Prisma.SortOrder
   description?: Prisma.SortOrder
   personality?: Prisma.SortOrder
+  preset?: Prisma.SortOrder
   scenario?: Prisma.SortOrder
   systemPrompt?: Prisma.SortOrder
   firstMessage?: Prisma.SortOrder
@@ -562,6 +582,7 @@ export type CharacterCardMaxOrderByAggregateInput = {
   coverImage?: Prisma.SortOrder
   description?: Prisma.SortOrder
   personality?: Prisma.SortOrder
+  preset?: Prisma.SortOrder
   scenario?: Prisma.SortOrder
   systemPrompt?: Prisma.SortOrder
   firstMessage?: Prisma.SortOrder
@@ -582,6 +603,7 @@ export type CharacterCardMinOrderByAggregateInput = {
   coverImage?: Prisma.SortOrder
   description?: Prisma.SortOrder
   personality?: Prisma.SortOrder
+  preset?: Prisma.SortOrder
   scenario?: Prisma.SortOrder
   systemPrompt?: Prisma.SortOrder
   firstMessage?: Prisma.SortOrder
@@ -681,6 +703,7 @@ export type CharacterCardCreateWithoutCreatorInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -702,6 +725,7 @@ export type CharacterCardUncheckedCreateWithoutCreatorInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -751,6 +775,7 @@ export type CharacterCardScalarWhereInput = {
   coverImage?: Prisma.StringNullableFilter<"CharacterCard"> | string | null
   description?: Prisma.StringFilter<"CharacterCard"> | string
   personality?: Prisma.StringFilter<"CharacterCard"> | string
+  preset?: Prisma.StringFilter<"CharacterCard"> | string
   scenario?: Prisma.StringFilter<"CharacterCard"> | string
   systemPrompt?: Prisma.StringFilter<"CharacterCard"> | string
   firstMessage?: Prisma.StringFilter<"CharacterCard"> | string
@@ -771,6 +796,7 @@ export type CharacterCardCreateWithoutWorldBooksInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -792,6 +818,7 @@ export type CharacterCardUncheckedCreateWithoutWorldBooksInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -829,6 +856,7 @@ export type CharacterCardUpdateWithoutWorldBooksInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -850,6 +878,7 @@ export type CharacterCardUncheckedUpdateWithoutWorldBooksInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -871,6 +900,7 @@ export type CharacterCardCreateWithoutChatSessionsInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -892,6 +922,7 @@ export type CharacterCardUncheckedCreateWithoutChatSessionsInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -929,6 +960,7 @@ export type CharacterCardUpdateWithoutChatSessionsInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -950,6 +982,7 @@ export type CharacterCardUncheckedUpdateWithoutChatSessionsInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -971,6 +1004,7 @@ export type CharacterCardCreateManyCreatorInput = {
   coverImage?: string | null
   description?: string
   personality?: string
+  preset?: string
   scenario?: string
   systemPrompt?: string
   firstMessage?: string
@@ -990,6 +1024,7 @@ export type CharacterCardUpdateWithoutCreatorInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -1011,6 +1046,7 @@ export type CharacterCardUncheckedUpdateWithoutCreatorInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -1032,6 +1068,7 @@ export type CharacterCardUncheckedUpdateManyWithoutCreatorInput = {
   coverImage?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   description?: Prisma.StringFieldUpdateOperationsInput | string
   personality?: Prisma.StringFieldUpdateOperationsInput | string
+  preset?: Prisma.StringFieldUpdateOperationsInput | string
   scenario?: Prisma.StringFieldUpdateOperationsInput | string
   systemPrompt?: Prisma.StringFieldUpdateOperationsInput | string
   firstMessage?: Prisma.StringFieldUpdateOperationsInput | string
@@ -1091,6 +1128,7 @@ export type CharacterCardSelect<ExtArgs extends runtime.Types.Extensions.Interna
   coverImage?: boolean
   description?: boolean
   personality?: boolean
+  preset?: boolean
   scenario?: boolean
   systemPrompt?: boolean
   firstMessage?: boolean
@@ -1115,6 +1153,7 @@ export type CharacterCardSelectCreateManyAndReturn<ExtArgs extends runtime.Types
   coverImage?: boolean
   description?: boolean
   personality?: boolean
+  preset?: boolean
   scenario?: boolean
   systemPrompt?: boolean
   firstMessage?: boolean
@@ -1136,6 +1175,7 @@ export type CharacterCardSelectUpdateManyAndReturn<ExtArgs extends runtime.Types
   coverImage?: boolean
   description?: boolean
   personality?: boolean
+  preset?: boolean
   scenario?: boolean
   systemPrompt?: boolean
   firstMessage?: boolean
@@ -1157,6 +1197,7 @@ export type CharacterCardSelectScalar = {
   coverImage?: boolean
   description?: boolean
   personality?: boolean
+  preset?: boolean
   scenario?: boolean
   systemPrompt?: boolean
   firstMessage?: boolean
@@ -1170,7 +1211,7 @@ export type CharacterCardSelectScalar = {
   updatedAt?: boolean
 }
 
-export type CharacterCardOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "avatar" | "coverImage" | "description" | "personality" | "scenario" | "systemPrompt" | "firstMessage" | "alternateGreetings" | "exampleDialogue" | "creatorNotes" | "tags" | "source" | "createdBy" | "createdAt" | "updatedAt", ExtArgs["result"]["characterCard"]>
+export type CharacterCardOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "name" | "avatar" | "coverImage" | "description" | "personality" | "preset" | "scenario" | "systemPrompt" | "firstMessage" | "alternateGreetings" | "exampleDialogue" | "creatorNotes" | "tags" | "source" | "createdBy" | "createdAt" | "updatedAt", ExtArgs["result"]["characterCard"]>
 export type CharacterCardInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   creator?: boolean | Prisma.UserDefaultArgs<ExtArgs>
   worldBooks?: boolean | Prisma.CharacterCard$worldBooksArgs<ExtArgs>
@@ -1198,6 +1239,7 @@ export type $CharacterCardPayload<ExtArgs extends runtime.Types.Extensions.Inter
     coverImage: string | null
     description: string
     personality: string
+    preset: string
     scenario: string
     systemPrompt: string
     firstMessage: string
@@ -1641,6 +1683,7 @@ export interface CharacterCardFieldRefs {
   readonly coverImage: Prisma.FieldRef<"CharacterCard", 'String'>
   readonly description: Prisma.FieldRef<"CharacterCard", 'String'>
   readonly personality: Prisma.FieldRef<"CharacterCard", 'String'>
+  readonly preset: Prisma.FieldRef<"CharacterCard", 'String'>
   readonly scenario: Prisma.FieldRef<"CharacterCard", 'String'>
   readonly systemPrompt: Prisma.FieldRef<"CharacterCard", 'String'>
   readonly firstMessage: Prisma.FieldRef<"CharacterCard", 'String'>

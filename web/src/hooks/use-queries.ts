@@ -98,6 +98,118 @@ export function useWorldBook(id: string) {
   });
 }
 
+interface CharacterMutationPayload {
+  name: string;
+  description: string;
+  personality: string;
+  preset: string;
+  scenario: string;
+  systemPrompt: string;
+  firstMessage: string;
+  exampleDialogue: string;
+  creatorNotes: string;
+  source: string;
+  tags: string[];
+  worldBookIds: string[];
+  coverImageDataUrl?: string | null;
+}
+
+function buildCharacterFormData(payload: CharacterMutationPayload): FormData {
+  const fd = new FormData();
+  const { coverImageDataUrl, tags, worldBookIds, ...fields } = payload;
+  for (const [k, v] of Object.entries(fields)) {
+    fd.append(k, v as string);
+  }
+  fd.append("tags", JSON.stringify(tags));
+  fd.append("worldBookIds", JSON.stringify(worldBookIds));
+  fd.append("alternateGreetings", JSON.stringify([]));
+  if (coverImageDataUrl?.startsWith("data:")) {
+    const [meta, b64] = coverImageDataUrl.split(",");
+    const mime = meta.match(/:(.*?);/)?.[1] ?? "image/png";
+    const bytes = atob(b64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    fd.append("coverImageFile", new Blob([arr], { type: mime }), "cover.png");
+  }
+  return fd;
+}
+
+export function useCreateCharacter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CharacterMutationPayload) => {
+      if (USE_MOCK) {
+        return mockApi.createCharacter({
+          name: payload.name,
+          description: payload.description,
+          personality: payload.personality,
+          preset: payload.preset,
+          scenario: payload.scenario,
+          systemPrompt: payload.systemPrompt,
+          firstMessage: payload.firstMessage,
+          alternateGreetings: [],
+          exampleDialogue: payload.exampleDialogue,
+          creatorNotes: payload.creatorNotes,
+          source: payload.source as CharacterCard["source"],
+          tags: payload.tags,
+          worldBookIds: payload.worldBookIds,
+          avatar: null,
+          coverImage: payload.coverImageDataUrl ?? null,
+        });
+      }
+      const fd = buildCharacterFormData(payload);
+      return api.upload<ApiResponse<CharacterCard>>("/admin/characters", fd);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["characters"] });
+    },
+  });
+}
+
+export function useUpdateCharacter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...payload }: CharacterMutationPayload & { id: string }) => {
+      if (USE_MOCK) {
+        return mockApi.updateCharacter(id, {
+          name: payload.name,
+          description: payload.description,
+          personality: payload.personality,
+          preset: payload.preset,
+          scenario: payload.scenario,
+          systemPrompt: payload.systemPrompt,
+          firstMessage: payload.firstMessage,
+          exampleDialogue: payload.exampleDialogue,
+          creatorNotes: payload.creatorNotes,
+          source: payload.source as CharacterCard["source"],
+          tags: payload.tags,
+          worldBookIds: payload.worldBookIds,
+          coverImage: payload.coverImageDataUrl ?? null,
+        });
+      }
+      const fd = buildCharacterFormData(payload);
+      return api.uploadPut<ApiResponse<CharacterCard>>(`/admin/characters/${id}`, fd);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["characters"] });
+      queryClient.invalidateQueries({ queryKey: ["character", variables.id] });
+    },
+  });
+}
+
+export function useDeleteCharacter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      USE_MOCK
+        ? mockApi.deleteCharacter(id)
+        : api.delete<ApiResponse<{ deleted: true }>>(`/admin/characters/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["characters"] });
+    },
+  });
+}
+
 export function useCreateSession() {
   const queryClient = useQueryClient();
   return useMutation({

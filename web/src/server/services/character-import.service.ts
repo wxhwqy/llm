@@ -21,12 +21,58 @@ interface STCharacterCardV2 {
   };
 }
 
+/**
+ * 去除 HTML 标签，保留纯文本。
+ * JanitorAI 等平台会在文本字段中嵌入 HTML（装饰图、样式标签等），
+ * 导入时需要清理为纯文本。
+ */
+function stripHtml(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/<img[^>]*>/gi, "")           // 移除图片标签
+    .replace(/<br\s*\/?>/gi, "\n")         // <br> → 换行
+    .replace(/<\/p>/gi, "\n")              // </p> → 换行
+    .replace(/<[^>]+>/g, "")               // 移除其余所有标签
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, "\n\n")            // 合并多余空行
+    .trim();
+}
+
+/**
+ * 检测字符串是否包含 HTML 标签
+ */
+function containsHtml(text: string): boolean {
+  return /<[a-z][\s\S]*>/i.test(text);
+}
+
+/**
+ * 映射 SillyTavern / JanitorAI 角色卡字段到内部格式（1:1 映射，不交换字段）。
+ *
+ * 内部字段语义：
+ * - description: 角色定义，组 prompt 给 AI 用（对应 ST.description）
+ * - personality: 给用户看的角色介绍（对应 ST.personality）
+ *
+ * JanitorAI 等平台可能在 personality 中嵌入 HTML，导入时做清理。
+ */
 function mapSTCard(st: STCharacterCardV2) {
   const d = st.data;
+
+  // personality 可能包含 JanitorAI 平台注入的 HTML，需要清理
+  const rawPersonality = d.personality ?? "";
+  const cleanedPersonality = containsHtml(rawPersonality)
+    ? stripHtml(rawPersonality)
+    : rawPersonality;
+
   return {
     name: d.name,
     description: d.description ?? "",
-    personality: d.personality ?? "",
+    personality: cleanedPersonality,
+    preset: "",
     scenario: d.scenario ?? "",
     systemPrompt: d.system_prompt ?? "",
     firstMessage: d.first_mes ?? "",

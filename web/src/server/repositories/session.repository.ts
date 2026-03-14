@@ -13,7 +13,7 @@ export interface SessionRow {
   maxTokens: number;
   createdAt: Date;
   updatedAt: Date;
-  character: { name: string; avatar: string | null };
+  character: { name: string; avatar: string | null; coverImage: string | null };
   messages?: { content: string }[];
   personalBooks?: { worldBookId: string }[];
 }
@@ -59,7 +59,7 @@ export async function listSessionsPaginated(userId: string, page: number, pageSi
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: {
-        character: { select: { name: true, avatar: true } },
+        character: { select: { name: true, avatar: true, coverImage: true } },
         messages: { orderBy: { createdAt: "desc" }, take: 1, select: { content: true } },
         personalBooks: { select: { worldBookId: true } },
       },

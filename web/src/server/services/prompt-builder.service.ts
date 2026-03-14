@@ -11,11 +11,11 @@ interface MatchedEntry {
 }
 
 interface CharacterData {
+  preset: string;
   systemPrompt: string;
-  personality: string;
+  description: string;
   scenario: string;
   exampleDialogue: string;
-  firstMessage: string;
 }
 
 export function buildPrompt(params: {
@@ -39,11 +39,12 @@ export function buildPrompt(params: {
     .join("\n\n");
 
   let systemContent = "";
+  if (character.preset) systemContent += character.preset + "\n\n";
   if (beforeSystem) systemContent += beforeSystem + "\n\n";
   if (character.systemPrompt) systemContent += character.systemPrompt + "\n\n";
-  if (character.personality || character.scenario) {
+  if (character.description || character.scenario) {
     systemContent += "## 角色设定\n";
-    if (character.personality) systemContent += `性格: ${character.personality}\n`;
+    if (character.description) systemContent += `角色描述: ${character.description}\n`;
     if (character.scenario) systemContent += `场景: ${character.scenario}\n`;
     systemContent += "\n";
   }
@@ -56,12 +57,7 @@ export function buildPrompt(params: {
     messages.push({ role: "system", content: systemContent.trim() });
   }
 
-  // -- First message --
-  if (character.firstMessage) {
-    messages.push({ role: "assistant", content: character.firstMessage });
-  }
-
-  // -- History --
+  // -- History (firstMessage 已在创建 session 时存入 DB，包含在 historyMessages 中) --
   for (const msg of historyMessages) {
     messages.push({ role: msg.role, content: msg.content });
   }

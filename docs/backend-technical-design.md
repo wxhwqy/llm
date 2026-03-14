@@ -1,8 +1,8 @@
 # 聊天机器人项目 — 后端技术方案文档
 
-> 版本：0.2 | 最后更新：2026-03-03
+> 版本：0.4 | 最后更新：2026-03-14
 >
-> 对应 PRD 版本：0.3 | 对应 LLM Service API 版本：0.1
+> 对应 PRD 版本：0.3 | 对应 LLM Service API 版本：0.2
 
 ---
 
@@ -55,7 +55,10 @@ web/src/
 │   └── models/                 # 代理 LLM Service 模型列表
 ├── server/
 │   ├── services/               # 业务逻辑
-│   │   ├── chat.service.ts          # 聊天核心：发消息、重新生成、停止
+│   │   ├── session.service.ts       # 会话 CRUD（创建、列表、更新、删除）
+│   │   ├── message.service.ts       # 消息 CRUD（获取历史、编辑）
+│   │   ├── chat-stream.service.ts   # 聊天流引擎：发消息、重新生成（组装 Prompt + 调用 SSE 引擎）
+│   │   ├── sse-stream.service.ts    # 通用 SSE 流引擎：LLM 调用 → chunk 转发 → 回调
 │   │   ├── prompt-builder.service.ts # Prompt 组装
 │   │   ├── context-manager.service.ts # 上下文窗口管理 + 压缩
 │   │   ├── worldbook-injector.service.ts # 世界书关键词匹配与注入
@@ -65,6 +68,8 @@ web/src/
 │   ├── db/
 │   │   ├── prisma.ts                # Prisma Client 单例
 │   │   └── repositories/            # 数据访问层
+│   │       ├── session.repo.ts      # ChatSession 查询 + 归属校验
+│   │       └── message.repo.ts      # ChatMessage 查询 + 游标分页
 │   ├── middleware/              # withAuth, withAdmin, rateLimit
 │   ├── validators/              # Zod schemas
 │   └── lib/                    # errors, config, redis, response 工具
@@ -102,7 +107,10 @@ User ──1:N──► ChatSession ──1:N──► ChatMessage
 
 **User**：id, username, email, passwordHash, role(USER/ADMIN), createdAt, updatedAt
 
-**CharacterCard**：id, name, avatar?, coverImage?, description, personality, scenario, systemPrompt, firstMessage, alternateGreetings[], exampleDialogue, creatorNotes, tags[], source(MANUAL/SILLYTAVERN_PNG/JSON_IMPORT), createdBy → User
+**CharacterCard**：id, name, avatar?, coverImage?, description, personality, **preset**, scenario, systemPrompt, firstMessage, alternateGreetings[], exampleDialogue, creatorNotes, tags[], source(MANUAL/SILLYTAVERN_PNG/JSON_IMPORT), createdBy → User
+
+> **v0.4 新增字段**：
+> - `preset`（String, 默认空）：角色卡预设文本，在 Prompt 中位于最前面（system message 的第一段），用于注入全局性的角色扮演规则、输出格式要求等。与 `systemPrompt` 的区别：`preset` 是跨角色可复用的通用指令（如"请用中文回复"、"你是一个角色扮演 AI"），`systemPrompt` 是角色专属的提示词。
 
 **WorldBook**：id, name, description, version, **scope(GLOBAL/PERSONAL)**, **userId → User**, totalTokenCount, createdAt, updatedAt
 
@@ -168,25 +176,40 @@ Phase 1-3 用 SQLite 开发（零配置），Phase 4 切 PostgreSQL。Prisma 自
 
 ### 6.1 聊天消息处理（核心链路）
 
-这是系统最关键的流程。用户发送消息后，经过以下步骤：
+这是系统最关键的流程。v0.3 对聊天模块进行了模块化重构，拆分为四层：
 
 ```
-[1] 参数校验 + 权限验证（session 归属当前用户）
+Route Handler (app/api/chat/...)
+    ↓ 调用
+chat-stream.service.ts  — 编排层：Prompt 构建 + 世界书注入 + 上下文裁剪
+    ↓ 调用
+sse-stream.service.ts   — 通用 SSE 流引擎：LLM 调用 → chunk 转发 → 回调
+    ↓ 调用
+llm-client.service.ts   — HTTP 层：封装 LLM Service API 调用
+```
+
+**会话/消息 CRUD** 独立在 `session.service.ts` 和 `message.service.ts` 中，不再与流式逻辑混合。两者通过 Repository 层 (`session.repo.ts` / `message.repo.ts`) 访问数据库，Repository 封装了常用查询和归属校验（如 `findOwnedSession` 会同时校验 session 存在性和 userId 归属）。
+
+用户发送消息后，经过以下步骤：
+
+```
+[1] 参数校验 + 权限验证（session 归属当前用户）  — Route Handler + Repository
  ↓
-[2] 保存用户消息到 DB，计算 tokenCount
+[2] 保存用户消息到 DB，计算 tokenCount           — chat-stream.service
  ↓
-[3] Prompt 构建（详见 6.2）
+[3] Prompt 构建（详见 6.2）                       — chat-stream.service → prompt-builder
     收集：系统提示词 + 角色设定 + 世界书词条 + 历史消息 + 当前输入
  ↓
-[4] 上下文窗口检查（详见 6.3）
+[4] 上下文窗口检查（详见 6.3）                    — chat-stream.service → context-manager
     超限 → 滑动窗口压缩 + 世界书优先级裁剪
  ↓
-[5] 调用 LLM Service：POST /v1/chat/completions, stream=true
+[5] 调用 LLM Service：POST /v1/chat/completions   — sse-stream → llm-client
+    stream=true, session_id=当前会话 ID（详见 6.7）
  ↓
-[6] SSE 流式转发（详见 6.4）
+[6] SSE 流式转发（详见 6.5）                      — sse-stream.service
     读取上游 chunk → 透传前端 → 累计 content → 监听客户端断开
  ↓
-[7] 生成完毕：保存 AI 回复 → 从最后 chunk 提取 usage → 记录 TokenUsage → 更新 session
+[7] 生成完毕：保存 AI 回复 → 记录 TokenUsage → 更新 session  — chat-stream onComplete 回调
 ```
 
 **停止生成**：前端断开 SSE 连接即可。后端监听 `req.signal` 的 abort 事件，调用 `AbortController.abort()` 取消上游请求。LLM Service 检测到连接断开后自动停止推理（参见 llm-service-api.md §6）。已生成的部分内容保存到 DB。**无需单独的 stop API**——直接复用 HTTP 连接断开机制。
@@ -201,9 +224,10 @@ Phase 1-3 用 SQLite 开发（零配置），Phase 4 切 PostgreSQL。Prisma 自
 
 ```
 messages[0] = { role: "system", content: 拼接以下内容 }
+  ├── 【v0.4 新增】角色卡 preset（预设，最前面）
   ├── [BEFORE_SYSTEM 世界书词条]
   ├── 角色卡 systemPrompt
-  ├── 角色设定（personality + scenario）
+  ├── 角色设定（description + scenario）
   ├── [AFTER_SYSTEM 世界书词条]
   └── 示例对话（如有）
 
@@ -213,6 +237,10 @@ messages[2..N-1] = 历史消息（按时间顺序）
 
 messages[N] = { role: "user", content: [BEFORE_USER 世界书词条] + 当前输入 }
 ```
+
+> **v0.4 变更**：
+> - `preset` 位于 system message 的最前面，优先级最高。这确保预设中的全局规则（如输出语言、角色扮演规范）在所有其他内容之前被 LLM 读取。
+> - `description`（原 `personality`）用于角色设定部分（给 AI 的角色定义），`personality` 改为仅供前端展示（给用户看的角色介绍）。详见 v0.3→v0.4 字段语义修正。
 
 ### 6.3 世界书注入
 
@@ -247,9 +275,27 @@ messages[N] = { role: "user", content: [BEFORE_USER 世界书词条] + 当前输
 
 **Token 计数**：用 `js-tiktoken` 做预估，以 LLM Service 返回的 `usage` 做精确记录和校准。
 
-### 6.5 SSE 流式转发
+### 6.5 SSE 流式转发（sse-stream.service）
 
-核心思路：后端作为 SSE 代理，从 LLM Service 读取 chunk，透传给前端，同时累计完整内容。
+v0.3 将 SSE 流的读取、解析、转发逻辑抽取为通用引擎 `sse-stream.service.ts`，通过回调机制与业务逻辑解耦。核心函数签名：
+
+```typescript
+createLLMStream(
+  messages: { role: string; content: string }[],
+  modelId: string,
+  callbacks: StreamCallbacks,
+  opts?: { abortSignal?: AbortSignal; sessionId?: string },
+): ReadableStream<Uint8Array>
+```
+
+**StreamCallbacks** 生命周期回调：
+- `onBeforeStream(send)` — LLM 流开始前，如发送 `user_message` 事件
+- `onComplete(send, result)` — 生成完毕，保存 assistant 消息、记录 TokenUsage
+- `onError(send, error)` — 错误处理
+
+`chat-stream.service` 中的 `sendMessageStream` 和 `regenerateStream` 均通过此引擎实现，消除了原先两处 ~160 行的重复代码。后续新增"续写"、"分支对话"等功能时，只需提供不同的回调即可。
+
+**opts.sessionId** 会透传给 `llm-client.service.ts` 的 `streamChatCompletion()`，作为 `session_id` 字段发送给 LLM Service（详见 6.7）。
 
 关键实现要点：
 - 使用 `ReadableStream` 构建 SSE 响应，Response Header 设置 `Content-Type: text/event-stream`
@@ -274,14 +320,43 @@ messages[N] = { role: "user", content: [BEFORE_USER 世界书词条] + 当前输
 
 ### 6.7 LLM Service 客户端
 
-`LLMClientService` 封装与 LLM Service（`docs/llm-service-api.md`）的所有交互：
+`llm-client.service.ts` 封装与 LLM Service（`docs/llm-service-api.md`）的所有交互：
 
 | 方法 | 对应 API | 说明 |
 |------|---------|------|
 | `streamChatCompletion()` | `POST /v1/chat/completions` (stream=true) | 流式推理，返回 ReadableStream |
 | `chatCompletion()` | `POST /v1/chat/completions` (stream=false) | 非流式，用于摘要压缩等内部用途 |
 | `listModels()` | `GET /v1/models` | 模型列表，60s 内存缓存 |
-| `healthCheck()` | `GET /health` | 启动时探测，连接失败不阻止启动 |
+| `getHealthStatus()` | `GET /health` | 健康检查，返回队列状态信息 |
+
+**v0.3 新增：session_id 透传**
+
+`streamChatCompletion()` 新增可选参数 `sessionId`，传递时会在请求体中加入 `session_id` 字段：
+
+```typescript
+streamChatCompletion(
+  messages: { role: string; content: string }[],
+  modelId: string,
+  signal?: AbortSignal,
+  sessionId?: string,    // v0.3 新增
+): Promise<Response>
+```
+
+请求体示例：
+```json
+{
+  "model": "qwen3-32b",
+  "messages": [...],
+  "stream": true,
+  "no_think": true,
+  "temperature": 0.6,
+  "top_p": 0.95,
+  "max_tokens": 2048,
+  "session_id": "ses_001"
+}
+```
+
+`session_id` 由 `chat-stream.service` → `sse-stream.service` → `llm-client.service` 一路透传。LLM Service 可利用此字段做会话级别的状态管理（如 KV Cache 复用、日志关联等）。该字段为可选，不传时 LLM Service 行为与之前一致。
 
 **容错策略**：
 - 连接超时 5s，流式读无超时
@@ -309,7 +384,9 @@ messages[N] = { role: "user", content: [BEFORE_USER 世界书词条] + 当前输
 | 429 | 速率限制 |
 | 503 | LLM 服务不可用 / 队列满 |
 
-### 7.3 相比 PRD v0.1 新增/变更的 API
+### 7.3 API 变更历史
+
+**v0.2（相比 PRD v0.1）：**
 
 | API | 变更 |
 |-----|------|
@@ -320,6 +397,22 @@ messages[N] = { role: "user", content: [BEFORE_USER 世界书词条] + 当前输
 | `GET /api/worldbooks` | 变更，自动返回「个人 + 全局」，支持 `?scope=global|personal` 筛选 |
 | `POST /api/worldbooks` | 变更，普通用户只能创建 `scope=personal`；管理员可选 |
 | `POST /api/chat/sessions/[id]/stop` | **移除**，改为前端直接断开 SSE 连接 |
+
+**v0.3：**
+
+| 变更项 | 说明 |
+|--------|------|
+| 后端 Service 层重构 | `chat.service.ts` 拆分为 `session.service` + `message.service` + `chat-stream.service` + `sse-stream.service` 四个模块 |
+| 新增 Repository 层 | `session.repo.ts` + `message.repo.ts` 封装数据库查询和归属校验，Service 不再直接调用 Prisma |
+| LLM 调用新增 `session_id` | `streamChatCompletion()` 向 LLM Service 传递 `session_id`（值为 ChatSession ID），用于会话级状态管理 |
+
+**v0.4（本次）：**
+
+| 变更项 | 说明 |
+|--------|------|
+| CharacterCard 新增 `preset` 字段 | 角色卡预设文本，在 Prompt 中位于 system message 最前面。用于注入跨角色的通用规则（输出语言、角色扮演规范等）。DB 层为 `String @default("")`，API 层为可选字段 |
+| `description` / `personality` 字段语义修正 | `description` = 角色定义（给 AI 用，进 prompt）；`personality` = 角色介绍（给用户看，前端展示）。prompt-builder 改为读取 `description` 而非 `personality` |
+| Prompt 构建顺序调整 | system message 内容顺序变为：preset → BEFORE_SYSTEM 世界书 → systemPrompt → 角色设定(description+scenario) → AFTER_SYSTEM 世界书 → 示例对话 |
 
 ### 7.4 分页策略
 

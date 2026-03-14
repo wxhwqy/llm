@@ -283,6 +283,12 @@ class Qwen3:
         if reuse_cache:
             prefix_len = self._compute_prefix_match(tokens)
 
+        # Ensure at least 1 token is fed to the prefill stage.
+        # When the entire prompt matches the cached prefix (e.g. identical
+        # re-request or regenerate), back off by 1 so ntoken > 0.
+        if prefix_len >= len(tokens):
+            prefix_len = max(len(tokens) - 1, 0)
+
         if prefix_len > 0:
             # Reuse mode: roll back cache_len to the matched prefix boundary,
             # then only prefill the new suffix tokens.

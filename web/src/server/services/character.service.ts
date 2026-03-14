@@ -20,6 +20,7 @@ function formatCharacterDetail(c: Record<string, unknown>, worldBookIds: string[
   return {
     ...formatCharacterSummary(c),
     personality: c.personality,
+    preset: c.preset,
     scenario: c.scenario,
     systemPrompt: c.systemPrompt,
     firstMessage: c.firstMessage,
@@ -100,6 +101,7 @@ export async function createCharacter(
     name: string;
     description?: string;
     personality?: string;
+    preset?: string;
     scenario?: string;
     systemPrompt?: string;
     firstMessage?: string;
@@ -122,6 +124,7 @@ export async function createCharacter(
       tags: toJsonString(rest.tags),
       description: rest.description ?? "",
       personality: rest.personality ?? "",
+      preset: rest.preset ?? "",
       scenario: rest.scenario ?? "",
       systemPrompt: rest.systemPrompt ?? "",
       firstMessage: rest.firstMessage ?? "",
@@ -146,6 +149,7 @@ export async function updateCharacter(
     name?: string;
     description?: string;
     personality?: string;
+    preset?: string;
     scenario?: string;
     systemPrompt?: string;
     firstMessage?: string;

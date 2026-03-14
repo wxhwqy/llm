@@ -31,6 +31,7 @@ model CharacterCard {
   coverImage         String?
   description        String   @default("")
   personality        String   @default("")
+  preset             String   @default("")
   scenario           String   @default("")
   systemPrompt       String   @default("")
   firstMessage       String   @default("")

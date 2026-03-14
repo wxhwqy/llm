@@ -5,6 +5,7 @@ export interface CharacterCard {
   coverImage: string | null;
   description: string;
   personality: string;
+  preset: string;
   scenario: string;
   systemPrompt: string;
   firstMessage: string;
@@ -21,13 +22,14 @@ export interface CharacterCard {
 
 export type CharacterSummary = Pick<
   CharacterCard,
-  "id" | "name" | "avatar" | "coverImage" | "description" | "tags" | "source" | "createdAt" | "updatedAt"
+  "id" | "name" | "avatar" | "coverImage" | "description" | "personality" | "tags" | "source" | "createdAt" | "updatedAt"
 >;
 
 export interface CharacterCreateInput {
   name: string;
   description: string;
   personality: string;
+  preset: string;
   scenario: string;
   systemPrompt: string;
   firstMessage: string;

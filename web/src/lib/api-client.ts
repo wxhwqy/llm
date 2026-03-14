@@ -49,9 +49,10 @@ function streamRequest(
 function uploadRequest<T>(
   endpoint: string,
   formData: FormData,
+  method: "POST" | "PUT" = "POST",
 ): Promise<T> {
   return fetch(`${API_BASE}${endpoint}`, {
-    method: "POST",
+    method,
     body: formData,
   }).then(async (res) => {
     if (!res.ok) {
@@ -84,5 +85,8 @@ export const api = {
     request<T>(endpoint, { method: "DELETE" }),
 
   stream: streamRequest,
-  upload: uploadRequest,
+  upload: <T>(endpoint: string, formData: FormData) =>
+    uploadRequest<T>(endpoint, formData, "POST"),
+  uploadPut: <T>(endpoint: string, formData: FormData) =>
+    uploadRequest<T>(endpoint, formData, "PUT"),
 };

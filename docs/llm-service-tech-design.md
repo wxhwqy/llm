@@ -1,6 +1,6 @@
 # 大模型推理服务 — 技术方案文档
 
-> 版本：0.1-draft | 最后更新：2026-03-03
+> 版本：0.2 | 最后更新：2026-03-14
 >
 > 对应 PRD 版本：0.1-draft
 
@@ -68,7 +68,9 @@
 | `llaisysQwen3ModelTPSize` | 获取实际 TP 大小 |
 | `llaisysQwen3ModelInfer` | 贪婪推理（argmax） |
 | `llaisysQwen3ModelInferSampled` | 带采样参数的推理 |
-| `llaisysQwen3ModelReset` | 重置 KV-Cache |
+| `llaisysQwen3ModelReset` | 重置 KV-Cache（cache_len 归零） |
+| `llaisysQwen3ModelSetCacheLen` | 设置 cache_len 到指定位置（用于前缀复用回滚） |
+| `llaisysQwen3ModelGetCacheLen` | 获取当前 cache_len |
 
 **当前限制**：
 
@@ -77,8 +79,8 @@
 | 单请求串行推理 | `stream_generate` 内部有状态（KV-Cache 位置指针），不支持并发 | Phase 1 仅支持单并发 |
 | KV-Cache 固定预分配 | `max_seq_len` 写死 8192，全量预分配 | 显存浪费，无法动态扩缩 |
 | 无 Batch 推理 | `Infer` 接口一次处理一个请求 | 吞吐受限 |
-| 无 Prefix Cache | 每次请求从头 Prefill | 相同 System Prompt 重复计算 |
-| `reset()` 全量清零 | 会话间无法保留部分 KV-Cache | 无法复用前缀 |
+| 无跨会话 Prefix Cache | 不同会话间无法共享 System Prompt 的 KV-Cache | 相同 System Prompt 仍需各自 Prefill |
+| ~~`reset()` 全量清零~~ | ~~会话间无法保留部分 KV-Cache~~ | **已解决**：`setCacheLen()` 支持回滚到任意前缀位置，同会话多轮对话可复用前缀 KV |
 
 ---
 
@@ -1104,6 +1106,89 @@ async def unhandled_error_handler(request: Request, exc: Exception):
 
 ## 11. 引擎优化路线图
 
+### 11.0 ✅ 已实现 — 多轮对话 KV-Cache 前缀复用
+
+> 状态：**已上线** | 实现日期：2026-03-14
+
+**解决的问题**：原实现中每次请求调用 `reset()` 全量清零 KV-Cache，多轮对话时历史 token 需要完整重新 Prefill，TTFT 随对话轮数线性增长。
+
+**核心思路**：同一会话的多轮对话，prompt 存在大量公共前缀（System Prompt + 历史消息）。通过前缀匹配，只 Prefill 新增的 token，跳过已缓存的前缀部分。
+
+**数据流**：
+
+```
+第 1 轮:  [System + User₁]                    → 完整 Prefill 200 tokens → 生成回复
+第 2 轮:  [System + User₁ + Asst₁ + User₂]   → 前缀匹配 200+50=250 tokens → 只 Prefill 新增 30 tokens
+第 3 轮:  [System + User₁ + Asst₁ + User₂ + Asst₂ + User₃] → 前缀匹配 330 tokens → 只 Prefill 新增 25 tokens
+          ├─────── 缓存命中，跳过 ───────┤   ├── 实际计算 ──┤
+```
+
+**各层实现变更**：
+
+| 层级 | 变更 | 文件 |
+|------|------|------|
+| C++ Model | 新增 `setCacheLen(size_t)` / `cacheLen()` 方法，支持将 cache_len 回滚到任意前缀位置 | `qwen3.hpp/cpp`, `qwen3_tp.hpp/cpp` |
+| C API | 新增 `llaisysQwen3ModelSetCacheLen` / `llaisysQwen3ModelGetCacheLen` 导出函数 | `qwen3.h`, `qwen3.cc` |
+| Python Bindings | 注册 ctypes 原型 | `libllaisys/models.py` |
+| Python Model | `_compute_prefix_match()` 前缀匹配 + `stream_generate(reuse_cache=True)` 复用逻辑 | `models/qwen3.py` |
+| FastAPI Schema | `ChatCompletionRequest` 新增 `session_id` 可选字段 | `schemas/chat.py` |
+| FastAPI Inference | 当 `session_id` 非空时传递 `reuse_cache=True` 到引擎 | `services/inference.py` |
+| Web Backend | `streamChatCompletion()` 透传 `session_id` 到 LLM 服务 | `llm-client.service.ts` |
+
+**Python 层关键逻辑**（`Qwen3.stream_generate`）：
+
+```python
+# 1. 前缀匹配
+prefix_len = self._compute_prefix_match(tokens)  # 逐 token 对比
+
+# 2. 边界保护：至少保留 1 个 token 做 prefill（避免空输入）
+if prefix_len >= len(tokens):
+    prefix_len = max(len(tokens) - 1, 0)
+
+# 3. 回滚 cache_len 到匹配位置，只 prefill 新增 suffix
+if prefix_len > 0:
+    self.set_cache_len(prefix_len)
+    effective_input = tokens[prefix_len:]
+else:
+    self.reset()
+    effective_input = tokens
+
+# 4. 推理完成后，保存完整序列（含生成 tokens）供下次匹配
+self._prev_input_ids = tokens + generated
+self._prev_cache_len = len(tokens) + len(generated)
+```
+
+**API 使用方式**：
+
+```bash
+# 携带 session_id 即可启用 KV 复用
+curl -X POST /v1/chat/completions -d '{
+    "model": "qwen3-32b",
+    "messages": [...],
+    "session_id": "chat-session-abc123",  // ← 新增字段
+    "stream": true
+}'
+```
+
+**设计约束与限制**：
+
+| 约束 | 说明 |
+|------|------|
+| 单会话模型 | 当前 `max_concurrent=1`，KV-Cache 状态属于模型实例，同时只有一个会话可复用 |
+| 会话切换开销 | 不同 session_id 切换时前缀不匹配，退化为完整 Prefill（等价于原行为） |
+| 不支持跨会话 | 同一 System Prompt 的不同会话仍需各自计算（需 PagedAttention + Prefix Cache 支持） |
+| 生成内容变化 | 如果 temperature>0 导致上一轮回复不同，但 messages 中 assistant 内容匹配，KV 仍然正确（因为前缀匹配基于 input token IDs） |
+
+**性能预期**：
+
+| 指标 | 无复用 | 有复用（10 轮对话） | 说明 |
+|------|--------|-------------------|------|
+| TTFT | ~200ms/千 token | 第 2 轮起仅需 ~30ms | 只 Prefill 新增 token |
+| 显存 | 不变 | 不变 | KV-Cache 仍为预分配，无额外开销 |
+| 正确性 | 基线 | 等价 | 前缀 KV 与完整 Prefill 结果一致（确定性） |
+
+---
+
 ### 11.1 P1 — KV-Cache 动态分配
 
 **当前问题**：所有请求固定预分配 `max_seq_len=8192` 个位置的 KV-Cache，浪费显存。
@@ -1302,9 +1387,10 @@ void llaisysQwen3ModelPrefill(
 
 | 任务 | 详情 | 优先级 |
 |------|------|--------|
+| ~~5.0 多轮 KV 复用~~ | ~~同会话前缀匹配 + setCacheLen 回滚~~ | ✅ 已完成 |
 | 5.1 KV-Cache Block Pool | C++ 层 Block 分配器 + Python 封装 | P1 |
 | 5.2 PagedAttention | 修改 Self-Attention 算子支持非连续 KV | P1 |
-| 5.3 Prefix Cache | 前缀哈希 + LRU 缓存 + 命中率监控 | P1 |
+| 5.3 Prefix Cache（跨会话） | 前缀哈希 + LRU 缓存 + 命中率监控（需 PagedAttention） | P1 |
 | 5.4 Continuous Batching | Scheduler + Batched Decode + 动态插入 | P1 |
 | 5.5 Prefill-Decode 分离 | 独立调度 Prefill 和 Decode | P1 |
 | 5.6 Chunked Prefill | 长 Prompt 分块 + Decode 交错 | P2 |

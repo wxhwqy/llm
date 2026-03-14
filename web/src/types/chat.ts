@@ -13,6 +13,7 @@ export interface ChatSession {
   characterId: string;
   characterName: string;
   characterAvatar: string | null;
+  characterCoverImage: string | null;
   modelId: string;
   title: string;
   lastMessage: string;

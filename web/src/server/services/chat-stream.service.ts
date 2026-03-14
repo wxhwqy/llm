@@ -17,11 +17,11 @@ interface SessionWithCharacter {
   usedTokens: number;
   maxTokens: number;
   character: {
+    preset: string;
     systemPrompt: string;
-    personality: string;
+    description: string;
     scenario: string;
     exampleDialogue: string;
-    firstMessage: string;
   };
 }
 
@@ -37,11 +37,11 @@ async function buildFinalMessages(
   const character = session.character;
   const llmMessages = buildPrompt({
     character: {
+      preset: character.preset,
       systemPrompt: character.systemPrompt,
-      personality: character.personality,
+      description: character.description,
       scenario: character.scenario,
       exampleDialogue: character.exampleDialogue,
-      firstMessage: character.firstMessage,
     },
     worldBookEntries: entries,
     historyMessages: history.filter((m) => m.role !== "system"),

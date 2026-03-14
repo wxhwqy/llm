@@ -33,7 +33,14 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { useCharacter, useWorldBooks } from "@/hooks/use-queries";
+import {
+  useCharacter,
+  useWorldBooks,
+  useCreateCharacter,
+  useUpdateCharacter,
+  useDeleteCharacter,
+} from "@/hooks/use-queries";
+import { useImportStore } from "@/stores/import-store";
 import { getCoverGradient } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { CharacterCard } from "@/types/character";
@@ -87,6 +94,12 @@ export default function CharacterEditPage({
 
   const { data: characterData, isLoading } = useCharacter(isNew ? "" : id);
   const { data: worldBooksData } = useWorldBooks();
+  const importData = useImportStore((s) => s.data);
+  const clearImport = useImportStore((s) => s.clear);
+  const createCharacter = useCreateCharacter();
+  const updateCharacter = useUpdateCharacter();
+  const deleteCharacter = useDeleteCharacter();
+  const isSaving = createCharacter.isPending || updateCharacter.isPending;
 
   const character = characterData?.data;
   const allWorldBooks = worldBooksData?.data ?? [];
@@ -94,6 +107,7 @@ export default function CharacterEditPage({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [personality, setPersonality] = useState("");
+  const [preset, setPreset] = useState("");
   const [scenario, setScenario] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [firstMessage, setFirstMessage] = useState("");
@@ -103,6 +117,7 @@ export default function CharacterEditPage({
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [worldBookIds, setWorldBookIds] = useState<string[]>([]);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
@@ -110,6 +125,7 @@ export default function CharacterEditPage({
       setName(character.name);
       setDescription(character.description);
       setPersonality(character.personality);
+      setPreset(character.preset);
       setScenario(character.scenario);
       setSystemPrompt(character.systemPrompt);
       setFirstMessage(character.firstMessage);
@@ -118,8 +134,28 @@ export default function CharacterEditPage({
       setSource(character.source);
       setTags(character.tags);
       setWorldBookIds(character.worldBookIds);
+      setCoverPreview(character.coverImage ?? null);
     }
   }, [character]);
+
+  /* pre-fill from import data (SillyTavern / JSON) */
+  useEffect(() => {
+    if (isNew && importData) {
+      setName(importData.name);
+      setDescription(importData.description);
+      setPersonality(importData.personality);
+      setPreset(importData.preset ?? "");
+      setScenario(importData.scenario);
+      setSystemPrompt(importData.systemPrompt);
+      setFirstMessage(importData.firstMessage);
+      setExampleDialogue(importData.exampleDialogue);
+      setCreatorNotes(importData.creatorNotes);
+      setSource(importData.source);
+      setTags(importData.tags);
+      setCoverPreview(importData.imageDataUrl);
+      clearImport();
+    }
+  }, [isNew, importData, clearImport]);
 
   if (!isNew && isLoading) {
     return (
@@ -161,6 +197,47 @@ export default function CharacterEditPage({
     worldBookIds.includes(wb.id)
   );
 
+  const handleSave = () => {
+    if (isSaving || !name.trim()) return;
+    const payload = {
+      name: name.trim(),
+      description,
+      personality,
+      preset,
+      scenario,
+      systemPrompt,
+      firstMessage,
+      exampleDialogue,
+      creatorNotes,
+      source,
+      tags,
+      worldBookIds,
+      coverImageDataUrl: coverPreview,
+    };
+    if (isNew) {
+      createCharacter.mutate(payload, {
+        onSuccess: (res) => {
+          router.push(`/characters/${res.data.id}`);
+        },
+      });
+    } else {
+      updateCharacter.mutate({ id, ...payload }, {
+        onSuccess: () => {
+          router.push(`/characters/${id}`);
+        },
+      });
+    }
+  };
+
+  const handleDelete = () => {
+    setDeleteOpen(false);
+    deleteCharacter.mutate(id, {
+      onSuccess: () => {
+        router.push("/characters");
+      },
+    });
+  };
+
   return (
     <div className="h-full overflow-auto overscroll-none">
       <div className="mx-auto max-w-3xl px-4 py-6 lg:px-6">
@@ -185,9 +262,13 @@ export default function CharacterEditPage({
                 删除
               </Button>
             )}
-            <Button size="sm">
-              <Save className="h-4 w-4 mr-1.5" />
-              保存
+            <Button size="sm" onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-1.5" />
+              )}
+              {isSaving ? "保存中..." : "保存"}
             </Button>
           </div>
         </div>
@@ -197,15 +278,23 @@ export default function CharacterEditPage({
             <h2 className="text-base font-semibold">封面与头像</h2>
             <div
               className={cn(
-                "relative w-full aspect-[21/9] rounded-xl bg-gradient-to-br overflow-hidden",
-                gradient
+                "relative w-full aspect-[21/9] rounded-xl overflow-hidden",
+                coverPreview ? "bg-muted" : `bg-gradient-to-br ${gradient}`
               )}
             >
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-[80px] font-black text-white/10 select-none">
-                  {name?.[0] || "?"}
-                </span>
-              </div>
+              {coverPreview ? (
+                <img
+                  src={coverPreview}
+                  alt="封面预览"
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-[80px] font-black text-white/10 select-none">
+                    {name?.[0] || "?"}
+                  </span>
+                </div>
+              )}
               <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/40">
                 <Button variant="secondary" size="sm">
                   <ImageIcon className="h-4 w-4 mr-1.5" />
@@ -249,13 +338,13 @@ export default function CharacterEditPage({
             </div>
 
             <FormField
-              label="角色描述"
-              description="简短描述，在角色卡列表中展示"
+              label="角色简介"
+              description="面向用户的简短介绍，显示在角色卡列表和详情页"
             >
               <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="描述这个角色..."
+                value={personality}
+                onChange={(e) => setPersonality(e.target.value)}
+                placeholder="用一两句话介绍这个角色..."
                 rows={3}
                 className="resize-none"
               />
@@ -301,14 +390,27 @@ export default function CharacterEditPage({
             <h2 className="text-base font-semibold">角色设定</h2>
 
             <FormField
-              label="性格描述"
-              description="描述角色的性格特点，用于指导 AI 的对话风格"
+              label="预设（Preset）"
+              description={'全局角色扮演规则，位于系统消息最前面，可跨角色复用（如「用中文回复」「你是角色扮演AI」）'}
             >
               <Textarea
-                value={personality}
-                onChange={(e) => setPersonality(e.target.value)}
-                placeholder="例如：活泼开朗、好奇心强、善良正义..."
-                rows={2}
+                value={preset}
+                onChange={(e) => setPreset(e.target.value)}
+                placeholder="例如：你是一个角色扮演 AI，请始终保持角色设定，用中文回复..."
+                rows={3}
+                className="resize-none font-mono text-xs"
+              />
+            </FormField>
+
+            <FormField
+              label="角色定义"
+              description="详细的角色设定，作为 AI 的角色扮演指令（对应 SillyTavern 的 Description）"
+            >
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="详细描述角色的性格、背景、说话方式、行为习惯等..."
+                rows={5}
                 className="resize-none"
               />
             </FormField>
@@ -453,12 +555,10 @@ export default function CharacterEditPage({
             </Button>
             <Button
               variant="destructive"
-              onClick={() => {
-                setDeleteOpen(false);
-                router.push("/characters");
-              }}
+              onClick={handleDelete}
+              disabled={deleteCharacter.isPending}
             >
-              删除
+              {deleteCharacter.isPending ? "删除中..." : "删除"}
             </Button>
           </DialogFooter>
         </DialogContent>
