@@ -20,6 +20,11 @@ target("llaisys-ops-cpu")
         add_cxflags("-fPIC", "-Wno-unknown-pragmas")
     end
 
+    -- Enable SIMD optimizations for x86_64
+    if is_arch("x86_64") then
+        add_cxflags("-mavx2", "-mfma", "-mf16c")
+    end
+
     add_files("../src/ops/*/cpu/*.cpp")
 
     on_install(function (target) end)

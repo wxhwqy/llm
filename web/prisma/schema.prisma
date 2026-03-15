@@ -13,6 +13,7 @@ model User {
   email        String   @unique
   passwordHash String
   role         String   @default("user") // "user" | "admin"
+  status       String   @default("active") // "active" | "disabled"
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -116,8 +117,9 @@ model ChatSession {
   character   CharacterCard @relation(fields: [characterId], references: [id])
   modelId     String
   title       String @default("")
-  usedTokens  Int    @default(0)
-  maxTokens   Int    @default(8192)
+  usedTokens     Int     @default(0)
+  maxTokens      Int     @default(8192)
+  contextSummary String?
 
   messages       ChatMessage[]
   tokenUsages    TokenUsage[]
@@ -159,4 +161,17 @@ model TokenUsage {
 
   @@index([userId, createdAt])
   @@index([sessionId])
+}
+
+model LlmProvider {
+  id           String   @id @default(cuid())
+  name         String
+  baseUrl      String
+  apiKey       String   @default("")
+  models       String   @default("[]") // JSON: [{id, name, maxContextLength}]
+  autoDiscover Boolean  @default(true)
+  enabled      Boolean  @default(true)
+  priority     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

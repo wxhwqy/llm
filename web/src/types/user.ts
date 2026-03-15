@@ -3,7 +3,14 @@ export interface User {
   username: string;
   email: string;
   role: "admin" | "user";
+  status: "active" | "disabled";
   createdAt: string;
+}
+
+export interface AdminUserItem extends User {
+  sessionCount: number;
+  totalTokens: number;
+  updatedAt: string;
 }
 
 export interface TokenUsageStats {

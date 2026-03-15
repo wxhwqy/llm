@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
-import { withAuth, jsonPaginated } from "@/server/lib/response";
+import { apiHandler, jsonPaginated } from "@/server/lib/response";
 import { characterSearchSchema } from "@/server/validators/character";
 import { listCharacters } from "@/server/services/character.service";
 
-export const GET = withAuth(async (req: NextRequest) => {
+export const GET = apiHandler(async (req: NextRequest) => {
   const url = req.nextUrl;
   const rawTags = url.searchParams.getAll("tag");
   const params = characterSearchSchema.parse({

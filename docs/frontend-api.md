@@ -1,10 +1,29 @@
 # 前端 API 接口文档
 
-> 版本：0.4 | 最后更新：2026-03-14
+> 版本：0.6 | 最后更新：2026-03-14
 >
 > 本文档定义前端与后台（Next.js API Routes）之间的 HTTP API 接口规范。后台再通过 OpenAI-Compatible API 与大模型服务通信（详见 `docs/llm-service-api.md`）。
 
 ---
+
+### v0.5 → v0.6 变更摘要
+
+| # | 变更 | 影响范围 |
+|---|------|----------|
+| 1 | 角色卡列表/详情/标签接口改为公开（无需登录） | `GET /api/characters`、`GET /api/characters/:id`、`GET /api/characters/tags` 不再需要认证。前端首页无需登录即可显示角色卡列表。登录校验延迟到发起对话、查看"我的"等操作 |
+| 2 | 新增 LLM Provider 管理 API（管理员） | 支持管理员在后台配置多个大模型推理服务（本地 vLLM、云端 OpenAI/DeepSeek 等）。新增 `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/:id`、`POST /api/admin/providers/:id/test` |
+| 3 | 模型列表接口响应新增字段 | `GET /api/models` 返回的模型对象新增 `providerId` 和 `providerName` 字段，标识模型来源 |
+
+### v0.4 → v0.5 变更摘要
+
+| # | 变更 | 影响范围 |
+|---|------|----------|
+| 1 | 认证接口真实实现 | 登录/注册/登出从桩代码改为真实 JWT + bcrypt 实现。前端请求/响应格式不变，但现在会真正校验密码和返回错误 |
+| 2 | 新增 `PUT /api/users/me` | 用户修改自己的用户名/邮箱。前端个人资料页需新增编辑功能 |
+| 3 | 新增 `PUT /api/users/me/password` | 用户修改密码（需验证旧密码）。前端个人资料页需新增修改密码表单 |
+| 4 | 新增管理员用户管理 API | `GET /api/admin/users`（用户列表）、`PUT /api/admin/users/:id`（修改角色/状态）、`DELETE /api/admin/users/:id`（删除用户）。前端需新增管理员用户管理页面 |
+| 5 | User 对象新增 `status` 字段 | 值为 `active` / `disabled`。被禁用的用户所有接口返回 403。影响 `GET /api/auth/me` 和管理员用户列表的响应结构 |
+| 6 | 登录接口新增错误码 | `ACCOUNT_DISABLED`（账号被禁用，403）、`INVALID_CREDENTIALS`（密码错误，401） |
 
 ### v0.3 → v0.4 变更摘要
 
@@ -46,7 +65,9 @@
 
 ### 1.2 认证
 
-所有需要认证的接口通过 `httpOnly Cookie` 携带 JWT Token（Phase 4 实现）。MVP 阶段使用硬编码默认用户，无需认证。
+大部分接口通过 `httpOnly Cookie` 携带 JWT Token 进行认证。
+
+**公开接口**（无需登录）：角色卡列表、角色卡详情、标签列表、登录、注册。未登录用户可浏览角色卡，但发起对话、查看个人信息等操作需要登录。
 
 需要管理员权限的接口以 `/api/admin/` 开头，服务端 Middleware 校验 `user.role === 'admin'`。
 
@@ -131,13 +152,21 @@ POST /api/auth/login
       "username": "Admin",
       "email": "admin@example.com",
       "role": "admin",
+      "status": "active",
       "createdAt": "2026-02-01T00:00:00.000Z"
     }
   }
 }
 ```
 
-JWT Token 通过 `Set-Cookie: auth-token=xxx; HttpOnly; Secure; SameSite=Lax` 返回。
+JWT Token 通过 `Set-Cookie: auth-token=xxx; HttpOnly; Secure; SameSite=Lax; Max-Age=604800; Path=/` 返回。
+
+**错误响应**：
+
+| 状态码 | code | 说明 |
+|--------|------|------|
+| 401 | `INVALID_CREDENTIALS` | 邮箱不存在或密码错误 |
+| 403 | `ACCOUNT_DISABLED` | 账号已被管理员禁用 |
 
 ### 2.2 注册
 
@@ -155,7 +184,19 @@ POST /api/auth/register
 }
 ```
 
-**响应** `201`：结构同登录。
+| 字段 | 校验规则 |
+|------|----------|
+| `username` | 2-20 字符 |
+| `email` | 合法邮箱格式 |
+| `password` | ≥8 字符 |
+
+**响应** `201`：结构同登录（自动登录，Set-Cookie）。
+
+**错误响应**：
+
+| 状态码 | code | 说明 |
+|--------|------|------|
+| 409 | `CONFLICT` | 用户名或邮箱已被注册 |
 
 ### 2.3 登出
 
@@ -163,7 +204,7 @@ POST /api/auth/register
 POST /api/auth/logout
 ```
 
-**响应** `200`：清除 Cookie。
+**响应** `200`：清除 `auth-token` Cookie。
 
 ### 2.4 获取当前用户
 
@@ -180,6 +221,7 @@ GET /api/auth/me
     "username": "Admin",
     "email": "admin@example.com",
     "role": "admin",
+    "status": "active",
     "createdAt": "2026-02-01T00:00:00.000Z"
   }
 }
@@ -926,11 +968,198 @@ GET /api/users/me/usage?period=daily&from=2026-02-20&to=2026-03-03
 
 > `timeline` 按日期升序排列。`period=weekly` 时 `date` 为周一日期，`period=monthly` 时为月初日期。
 
+### 6.2 更新个人资料
+
+```
+PUT /api/users/me
+```
+
+**请求体**（部分更新）：
+
+```json
+{
+  "username": "新用户名",
+  "email": "newemail@example.com"
+}
+```
+
+| 字段 | 校验规则 |
+|------|----------|
+| `username` | 2-20 字符，唯一 |
+| `email` | 合法邮箱格式，唯一 |
+
+**响应** `200`：
+
+```json
+{
+  "data": {
+    "id": "usr_abc123",
+    "username": "新用户名",
+    "email": "newemail@example.com",
+    "role": "user",
+    "status": "active",
+    "createdAt": "2026-02-01T00:00:00.000Z"
+  }
+}
+```
+
+**错误** `409`：用户名或邮箱已被占用。
+
+### 6.3 修改密码
+
+```
+PUT /api/users/me/password
+```
+
+**请求体**：
+
+```json
+{
+  "oldPassword": "当前密码",
+  "newPassword": "新密码至少8位"
+}
+```
+
+**响应** `200`：
+
+```json
+{
+  "data": { "success": true }
+}
+```
+
+**错误响应**：
+
+| 状态码 | code | 说明 |
+|--------|------|------|
+| 401 | `INVALID_CREDENTIALS` | 旧密码错误 |
+| 400 | `VALIDATION_ERROR` | 新密码不符合要求（≥8 字符） |
+
 ---
 
-## 7. 模型 (`/api/models`)
+## 7. 用户管理 (`/api/admin/users`) 🔒
 
-### 7.1 获取可用模型列表
+> 以下接口均需要管理员权限。
+
+### 7.1 获取用户列表
+
+```
+GET /api/admin/users?search=test&role=user&status=active&page=1&pageSize=20
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `search` | string | 否 | 按用户名/邮箱模糊搜索 |
+| `role` | string | 否 | 按角色筛选：`admin` / `user` |
+| `status` | string | 否 | 按状态筛选：`active` / `disabled` |
+| `page` | number | 否 | 页码，默认 1 |
+| `pageSize` | number | 否 | 每页数量，默认 20 |
+
+**响应** `200`：
+
+```json
+{
+  "data": [
+    {
+      "id": "usr_abc123",
+      "username": "Admin",
+      "email": "admin@example.com",
+      "role": "admin",
+      "status": "active",
+      "sessionCount": 15,
+      "totalTokens": 324300,
+      "createdAt": "2026-02-01T00:00:00.000Z",
+      "updatedAt": "2026-02-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_def456",
+      "username": "测试用户",
+      "email": "test@example.com",
+      "role": "user",
+      "status": "active",
+      "sessionCount": 3,
+      "totalTokens": 12500,
+      "createdAt": "2026-03-10T00:00:00.000Z",
+      "updatedAt": "2026-03-12T00:00:00.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "pageSize": 20, "total": 2, "totalPages": 1 }
+}
+```
+
+> 列表中的 `sessionCount` 和 `totalTokens` 为聚合字段，方便管理员了解用户活跃度。
+
+### 7.2 更新用户（角色/状态）
+
+```
+PUT /api/admin/users/:id
+```
+
+**请求体**（部分更新）：
+
+```json
+{
+  "role": "admin",
+  "status": "disabled"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `role` | string | `admin` / `user` |
+| `status` | string | `active` / `disabled`，禁用后该用户所有请求返回 403 |
+
+**响应** `200`：
+
+```json
+{
+  "data": {
+    "id": "usr_def456",
+    "username": "测试用户",
+    "email": "test@example.com",
+    "role": "admin",
+    "status": "disabled",
+    "createdAt": "2026-03-10T00:00:00.000Z",
+    "updatedAt": "2026-03-14T00:00:00.000Z"
+  }
+}
+```
+
+**错误响应**：
+
+| 状态码 | code | 说明 |
+|--------|------|------|
+| 403 | `FORBIDDEN` | 不能修改自己的角色/状态 |
+| 404 | `NOT_FOUND` | 用户不存在 |
+
+### 7.3 删除用户
+
+```
+DELETE /api/admin/users/:id
+```
+
+> 级联删除该用户的所有会话、消息、token 记录、个人世界书。**此操作不可恢复**，前端应做二次确认弹窗。
+
+**响应** `200`：
+
+```json
+{
+  "data": { "deleted": true }
+}
+```
+
+**错误响应**：
+
+| 状态码 | code | 说明 |
+|--------|------|------|
+| 403 | `FORBIDDEN` | 不能删除自己 |
+| 404 | `NOT_FOUND` | 用户不存在 |
+
+---
+
+## 8. 模型 (`/api/models`)
+
+### 8.1 获取可用模型列表
 
 ```
 GET /api/models
@@ -945,13 +1174,17 @@ GET /api/models
       "id": "qwen3-32b",
       "name": "Qwen3 32B (FP8)",
       "maxContextLength": 8192,
-      "status": "online"
+      "status": "online",
+      "providerId": "prov_001",
+      "providerName": "本地 vLLM"
     },
     {
-      "id": "qwen3-8b",
-      "name": "Qwen3 8B (FP8)",
-      "maxContextLength": 8192,
-      "status": "offline"
+      "id": "deepseek-chat",
+      "name": "DeepSeek Chat",
+      "maxContextLength": 65536,
+      "status": "online",
+      "providerId": "prov_002",
+      "providerName": "DeepSeek"
     }
   ]
 }
@@ -960,9 +1193,11 @@ GET /api/models
 | 字段 | 说明 |
 |------|------|
 | `id` | 模型标识，用于 `chat/sessions` 的 `modelId` 参数 |
-| `name` | 人类可读名称，来自 LLM Service `GET /v1/models` |
+| `name` | 人类可读名称，来自 Provider 的 `GET /v1/models` 或手动配置 |
 | `maxContextLength` | 最大上下文窗口 (tokens)，用于前端上下文进度条计算 |
 | `status` | 见下表 |
+| `providerId` | 所属 Provider ID（v0.6 新增） |
+| `providerName` | 所属 Provider 名称（v0.6 新增），前端可用于分组展示 |
 
 | status | 含义 | 前端处理 |
 |--------|------|---------|
@@ -970,13 +1205,158 @@ GET /api/models
 | `offline` | 已注册但未加载，首次请求需等待 30-60s | 可选，但提示"首次使用需等待加载" |
 | `busy` | 队列接近满载 | 可选，但提示"当前繁忙" |
 
-> 后端缓存此接口 60 秒。`status` 由后端综合 LLM Service 的 `/v1/models`（loaded/available 状态）和 `/health`（队列信息）推算。
+> 后端缓存此接口 60 秒。`status` 由后端综合各 Provider 的 `/v1/models`（loaded/available 状态）和 `/health`（队列信息）推算。
 
 ---
 
-## 8. 前端调用示例
+## 9. LLM Provider 管理 (`/api/admin/providers`) 🔒
 
-### 8.1 流式消息处理
+> 以下接口均需要管理员权限。用于配置连接多个大模型推理服务。
+
+### 9.1 获取 Provider 列表
+
+```
+GET /api/admin/providers
+```
+
+**响应** `200`：
+
+```json
+{
+  "data": [
+    {
+      "id": "prov_001",
+      "name": "本地 vLLM",
+      "baseUrl": "http://localhost:8000",
+      "apiKey": "",
+      "models": [],
+      "autoDiscover": true,
+      "enabled": true,
+      "priority": 10,
+      "createdAt": "2026-03-14T00:00:00.000Z",
+      "updatedAt": "2026-03-14T00:00:00.000Z"
+    },
+    {
+      "id": "prov_002",
+      "name": "DeepSeek",
+      "baseUrl": "https://api.deepseek.com",
+      "apiKey": "sk-***eek",
+      "models": [
+        { "id": "deepseek-chat", "name": "DeepSeek Chat", "maxContextLength": 65536 },
+        { "id": "deepseek-reasoner", "name": "DeepSeek Reasoner", "maxContextLength": 65536 }
+      ],
+      "autoDiscover": false,
+      "enabled": true,
+      "priority": 5,
+      "createdAt": "2026-03-14T00:00:00.000Z",
+      "updatedAt": "2026-03-14T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+> `apiKey` 在响应中始终脱敏（仅显示最后 3 位），如 `sk-***eek`。空字符串原样返回。
+
+### 9.2 创建 Provider
+
+```
+POST /api/admin/providers
+```
+
+**请求体**：
+
+```json
+{
+  "name": "DeepSeek",
+  "baseUrl": "https://api.deepseek.com",
+  "apiKey": "sk-xxxxxxxxxxxxxxxx",
+  "models": [
+    { "id": "deepseek-chat", "name": "DeepSeek Chat", "maxContextLength": 65536 }
+  ],
+  "autoDiscover": false,
+  "enabled": true,
+  "priority": 5
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | Provider 显示名称 |
+| `baseUrl` | string | 是 | API 基础地址（如 `http://localhost:8000`、`https://api.deepseek.com`） |
+| `apiKey` | string | 否 | API 密钥，本地服务可不填 |
+| `models` | array | 否 | 手动配置的模型列表，每项需包含 `id`、`name`、`maxContextLength` |
+| `autoDiscover` | boolean | 否 | 是否自动通过 `/v1/models` 发现模型，默认 `true` |
+| `enabled` | boolean | 否 | 是否启用，默认 `true` |
+| `priority` | number | 否 | 排序优先级（越大越靠前），默认 `0` |
+
+**响应** `201`：返回完整 Provider 对象（结构同 9.1 中的单项）。
+
+### 9.3 更新 Provider
+
+```
+PUT /api/admin/providers/:id
+```
+
+**请求体**（部分更新）：与创建相同，所有字段可选。`apiKey` 传空字符串可清除密钥，不传则不修改。
+
+**响应** `200`：返回更新后的完整 Provider 对象。
+
+### 9.4 删除 Provider
+
+```
+DELETE /api/admin/providers/:id
+```
+
+> 删除 Provider 不会影响已有的聊天会话历史。但如果有会话正在使用该 Provider 的模型，后续发消息时会报错"模型不可用"。
+
+**响应** `200`：
+
+```json
+{
+  "data": { "deleted": true }
+}
+```
+
+### 9.5 测试 Provider 连通性
+
+```
+POST /api/admin/providers/:id/test
+```
+
+> 后端尝试调用该 Provider 的 `GET /v1/models` 接口，验证 baseUrl 和 apiKey 是否正确。
+
+**响应** `200`（连通成功）：
+
+```json
+{
+  "data": {
+    "success": true,
+    "models": [
+      { "id": "qwen3-32b", "name": "Qwen3 32B", "maxContextLength": 32768 }
+    ],
+    "latencyMs": 120
+  }
+}
+```
+
+**响应** `200`（连通失败）：
+
+```json
+{
+  "data": {
+    "success": false,
+    "error": "连接超时"
+  }
+}
+```
+
+> 测试接口始终返回 200，通过 `success` 字段区分成功/失败，避免前端误判为服务器错误。
+
+---
+
+## 10. 前端调用示例
+
+### 10.1 流式消息处理
 
 ```typescript
 async function sendMessage(sessionId: string, content: string, signal?: AbortSignal) {
@@ -1022,7 +1402,7 @@ async function sendMessage(sessionId: string, content: string, signal?: AbortSig
 }
 ```
 
-### 8.2 停止生成
+### 10.2 停止生成
 
 ```typescript
 const abortController = new AbortController();
@@ -1036,7 +1416,7 @@ function stopGeneration() {
 }
 ```
 
-### 8.3 游标分页加载消息历史
+### 10.3 游标分页加载消息历史
 
 ```typescript
 let nextCursor: string | undefined;
@@ -1055,7 +1435,7 @@ async function loadMessages(sessionId: string) {
 
 ---
 
-## 9. 接口总览
+## 11. 接口总览
 
 | 接口 | 方法 | 说明 | 认证 |
 |------|------|------|------|
@@ -1063,9 +1443,9 @@ async function loadMessages(sessionId: string) {
 | `/api/auth/register` | POST | 注册 | 否 |
 | `/api/auth/logout` | POST | 登出 | 是 |
 | `/api/auth/me` | GET | 获取当前用户 | 是 |
-| `/api/characters` | GET | 角色卡列表/搜索 | 是 |
-| `/api/characters/:id` | GET | 角色卡详情 | 是 |
-| `/api/characters/tags` | GET | 所有标签 | 是 |
+| `/api/characters` | GET | 角色卡列表/搜索 | **否** |
+| `/api/characters/:id` | GET | 角色卡详情 | **否** |
+| `/api/characters/tags` | GET | 所有标签 | **否** |
 | `/api/admin/characters` | POST | 创建角色卡 | 🔒 管理员 |
 | `/api/admin/characters/import` | POST | 导入角色卡 | 🔒 管理员 |
 | `/api/admin/characters/:id` | PUT | 更新角色卡 | 🔒 管理员 |
@@ -1089,5 +1469,15 @@ async function loadMessages(sessionId: string) {
 | `/api/chat/sessions/:id/messages` | POST | 发送消息（SSE 流） | 是 |
 | `/api/chat/sessions/:id/messages/:msgId` | PUT | 编辑消息 | 是 |
 | `/api/chat/sessions/:id/regenerate` | POST | 重新生成（SSE 流） | 是 |
+| `/api/users/me` | PUT | 更新个人资料 | 是 |
+| `/api/users/me/password` | PUT | 修改密码 | 是 |
 | `/api/users/me/usage` | GET | Token 使用统计 | 是 |
-| `/api/models` | GET | 可用模型列表 | 是 |
+| `/api/admin/users` | GET | 用户列表 | 🔒 管理员 |
+| `/api/admin/users/:id` | PUT | 更新用户（角色/状态） | 🔒 管理员 |
+| `/api/admin/users/:id` | DELETE | 删除用户 | 🔒 管理员 |
+| `/api/admin/providers` | GET | Provider 列表 | 🔒 管理员 |
+| `/api/admin/providers` | POST | 创建 Provider | 🔒 管理员 |
+| `/api/admin/providers/:id` | PUT | 更新 Provider | 🔒 管理员 |
+| `/api/admin/providers/:id` | DELETE | 删除 Provider | 🔒 管理员 |
+| `/api/admin/providers/:id/test` | POST | 测试 Provider 连通性 | 🔒 管理员 |
+| `/api/models` | GET | 可用模型列表（聚合所有 Provider） | 是 |

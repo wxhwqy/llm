@@ -1,15 +1,14 @@
 import { NextRequest } from "next/server";
 import type { AuthUser } from "../lib/response";
+import { UnauthorizedError } from "../lib/errors";
+import { verifyToken } from "../services/user.service";
 
-const DEFAULT_USER: AuthUser = {
-  id: "usr_default",
-  username: "Admin",
-  email: "admin@example.com",
-  role: "admin",
-  createdAt: "2026-02-01T00:00:00.000Z",
-};
+export async function getCurrentUser(req: NextRequest): Promise<AuthUser> {
+  const token = req.cookies.get("auth-token")?.value;
+  if (!token) {
+    throw new UnauthorizedError("请先登录");
+  }
 
-// Phase 1: hardcoded default user. Phase 4: JWT decode from cookie.
-export async function getCurrentUser(_req: NextRequest): Promise<AuthUser> {
-  return DEFAULT_USER;
+  const user = await verifyToken(token);
+  return user;
 }

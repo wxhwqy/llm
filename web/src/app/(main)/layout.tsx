@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   Users,
@@ -12,6 +12,9 @@ import {
   Menu,
   Sun,
   Moon,
+  LogIn,
+  LogOut,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,7 +24,16 @@ import {
   SheetTrigger,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useState, useEffect } from "react";
+import { useCurrentUser, useLogout } from "@/hooks/use-queries";
+import { useAuthStore } from "@/stores/auth-store";
 
 const navItems = [
   { href: "/characters", label: "角色卡", icon: Users },
@@ -82,6 +94,70 @@ function ThemeToggle() {
   );
 }
 
+function UserMenu() {
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const logout = useLogout();
+
+  if (!user) {
+    return (
+      <Link href="/login">
+        <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
+          <LogIn className="h-3.5 w-3.5" />
+          登录
+        </Button>
+      </Link>
+    );
+  }
+
+  const initial = user.username.charAt(0).toUpperCase();
+  const roleLabel = user.role === "admin" ? "管理员" : "用户";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="flex items-center gap-1.5 outline-none">
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            {roleLabel}
+          </span>
+          <div className="h-8 w-8 rounded-full bg-violet-600 flex items-center justify-center text-xs font-medium text-white">
+            {initial}
+          </div>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <div className="px-2 py-1.5">
+          <p className="text-sm font-medium">{user.username}</p>
+          <p className="text-xs text-muted-foreground">{user.email}</p>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => router.push("/profile")}>
+          <User className="h-4 w-4 mr-2" />
+          个人资料
+        </DropdownMenuItem>
+        {user.role === "admin" && (
+          <DropdownMenuItem onClick={() => router.push("/admin/users")}>
+            <Shield className="h-4 w-4 mr-2" />
+            用户管理
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => {
+            logout.mutate(undefined, {
+              onSuccess: () => router.push("/characters"),
+            });
+          }}
+          className="text-destructive focus:text-destructive"
+        >
+          <LogOut className="h-4 w-4 mr-2" />
+          退出登录
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export default function MainLayout({
   children,
 }: {
@@ -89,6 +165,9 @@ export default function MainLayout({
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Fetch current user on layout mount (silent — no redirect if unauthenticated)
+  useCurrentUser();
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -141,12 +220,7 @@ export default function MainLayout({
           {/* Right side */}
           <div className="ml-auto flex items-center gap-1.5">
             <ThemeToggle />
-            <span className="text-xs text-muted-foreground hidden sm:inline ml-1">
-              管理员
-            </span>
-            <div className="h-8 w-8 rounded-full bg-violet-600 flex items-center justify-center text-xs font-medium text-white">
-              A
-            </div>
+            <UserMenu />
           </div>
         </div>
       </header>

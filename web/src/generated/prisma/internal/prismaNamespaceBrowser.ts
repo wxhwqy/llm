@@ -59,7 +59,8 @@ export const ModelName = {
   SessionWorldBook: 'SessionWorldBook',
   ChatSession: 'ChatSession',
   ChatMessage: 'ChatMessage',
-  TokenUsage: 'TokenUsage'
+  TokenUsage: 'TokenUsage',
+  LlmProvider: 'LlmProvider'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -81,6 +82,7 @@ export const UserScalarFieldEnum = {
   email: 'email',
   passwordHash: 'passwordHash',
   role: 'role',
+  status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -166,6 +168,7 @@ export const ChatSessionScalarFieldEnum = {
   title: 'title',
   usedTokens: 'usedTokens',
   maxTokens: 'maxTokens',
+  contextSummary: 'contextSummary',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -200,6 +203,22 @@ export const TokenUsageScalarFieldEnum = {
 } as const
 
 export type TokenUsageScalarFieldEnum = (typeof TokenUsageScalarFieldEnum)[keyof typeof TokenUsageScalarFieldEnum]
+
+
+export const LlmProviderScalarFieldEnum = {
+  id: 'id',
+  name: 'name',
+  baseUrl: 'baseUrl',
+  apiKey: 'apiKey',
+  models: 'models',
+  autoDiscover: 'autoDiscover',
+  enabled: 'enabled',
+  priority: 'priority',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type LlmProviderScalarFieldEnum = (typeof LlmProviderScalarFieldEnum)[keyof typeof LlmProviderScalarFieldEnum]
 
 
 export const SortOrder = {

@@ -1,0 +1,71 @@
+[
+  {
+    "name": "本地 vLLM",
+    "baseUrl": "http://localhost:8000",
+    "apiKey": "",
+    "autoDiscover": true,
+    "enabled": true,
+    "priority": 10,
+    "models": []
+  },
+  {
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com",
+    "apiKey": "sk-你的deepseek密钥",
+    "autoDiscover": false,
+    "enabled": false,
+    "priority": 5,
+    "models": [
+      { "id": "deepseek-chat", "name": "DeepSeek V3", "maxContextLength": 65536 },
+      { "id": "deepseek-reasoner", "name": "DeepSeek R1", "maxContextLength": 65536 }
+    ]
+  },
+  {
+    "name": "OpenAI",
+    "baseUrl": "https://api.openai.com",
+    "apiKey": "sk-你的openai密钥",
+    "autoDiscover": false,
+    "enabled": false,
+    "priority": 3,
+    "models": [
+      { "id": "gpt-4o", "name": "GPT-4o", "maxContextLength": 128000 },
+      { "id": "gpt-4o-mini", "name": "GPT-4o Mini", "maxContextLength": 128000 }
+    ]
+  },
+  {
+    "name": "智谱 GLM",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "apiKey": "你的智谱密钥",
+    "autoDiscover": false,
+    "enabled": false,
+    "priority": 3,
+    "models": [
+      { "id": "glm-4-plus", "name": "GLM-4 Plus", "maxContextLength": 128000 },
+      { "id": "glm-4-flash", "name": "GLM-4 Flash", "maxContextLength": 128000 }
+    ]
+  },
+  {
+    "name": "Moonshot",
+    "baseUrl": "https://api.moonshot.cn",
+    "apiKey": "sk-你的moonshot密钥",
+    "autoDiscover": false,
+    "enabled": false,
+    "priority": 3,
+    "models": [
+      { "id": "moonshot-v1-8k", "name": "Moonshot v1 8K", "maxContextLength": 8192 },
+      { "id": "moonshot-v1-32k", "name": "Moonshot v1 32K", "maxContextLength": 32768 }
+    ]
+  },
+  {
+    "name": "硅基流动 SiliconFlow",
+    "baseUrl": "https://api.siliconflow.cn",
+    "apiKey": "sk-你的siliconflow密钥",
+    "autoDiscover": false,
+    "enabled": false,
+    "priority": 3,
+    "models": [
+      { "id": "Qwen/Qwen2.5-72B-Instruct", "name": "Qwen2.5 72B", "maxContextLength": 32768 },
+      { "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "maxContextLength": 65536 }
+    ]
+  }
+]

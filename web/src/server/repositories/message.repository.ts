@@ -85,6 +85,22 @@ export async function deleteMessage(id: string) {
   return prisma.chatMessage.delete({ where: { id } });
 }
 
+// ─── Compression ─────────────────────────────────────────
+
+export async function findUncompressedMessages(sessionId: string) {
+  return prisma.chatMessage.findMany({
+    where: { sessionId, isCompressed: false, role: { not: "system" } },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function markMessagesCompressed(ids: string[]) {
+  return prisma.chatMessage.updateMany({
+    where: { id: { in: ids } },
+    data: { isCompressed: true },
+  });
+}
+
 // ─── Token Usage ──────────────────────────────────────────
 
 export async function createTokenUsage(data: {

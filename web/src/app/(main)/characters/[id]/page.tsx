@@ -16,6 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCharacter, useCreateSession } from "@/hooks/use-queries";
+import { useRequireAuth } from "@/hooks/use-require-auth";
+import { useAuthStore } from "@/stores/auth-store";
 import { getCoverGradient, timeAgo } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { CharacterCard } from "@/types/character";
@@ -98,16 +100,18 @@ export default function CharacterDetailPage({
   const router = useRouter();
   const { data: characterData, isLoading, error } = useCharacter(id);
   const createSession = useCreateSession();
+  const requireAuth = useRequireAuth();
+  const isAdmin = useAuthStore((s) => s.isAdmin());
   const character = characterData?.data;
 
-  const handleStartChat = () => {
+  const handleStartChat = requireAuth(() => {
     if (createSession.isPending) return;
     createSession.mutate(id, {
       onSuccess: (data) => {
         router.push(`/chat/${data.data.id}`);
       },
     });
-  };
+  });
 
   if (isLoading) {
     return (
@@ -138,13 +142,15 @@ export default function CharacterDetailPage({
             <ArrowLeft className="h-4 w-4" />
             返回角色卡列表
           </Link>
-          <Link
-            href={`/characters/${character.id}/edit`}
-            className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-            title="编辑"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Link>
+          {isAdmin && (
+            <Link
+              href={`/characters/${character.id}/edit`}
+              className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+              title="编辑"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Link>
+          )}
         </div>
 
         <div className="flex flex-col md:flex-row gap-6 lg:gap-8">

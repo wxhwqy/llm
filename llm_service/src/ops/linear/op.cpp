@@ -3,51 +3,12 @@
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
 
+#include "cpu/linear_cpu.hpp"
 #ifdef ENABLE_NVIDIA_API
 #include "nvidia/linear_nvidia.cuh"
 #endif
 
 namespace llaisys::ops {
-
-template <typename T>
-void linear_cpu(std::byte *out_ptr, const std::byte *in_ptr, const std::byte *weight_ptr,
-                const std::byte *bias_ptr, size_t M, size_t K, size_t N) {
-    T *out = reinterpret_cast<T *>(out_ptr);
-    const T *in = reinterpret_cast<const T *>(in_ptr);
-    const T *weight = reinterpret_cast<const T *>(weight_ptr);
-    const T *bias = bias_ptr ? reinterpret_cast<const T *>(bias_ptr) : nullptr;
-
-    for (size_t m = 0; m < M; m++) {
-        for (size_t n = 0; n < N; n++) {
-            float sum = 0.0f;
-            for (size_t k = 0; k < K; k++) {
-                float in_val, w_val;
-                if constexpr (std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t>) {
-                    in_val = utils::cast<float>(in[m * K + k]);
-                    w_val = utils::cast<float>(weight[n * K + k]);
-                } else {
-                    in_val = static_cast<float>(in[m * K + k]);
-                    w_val = static_cast<float>(weight[n * K + k]);
-                }
-                sum += in_val * w_val;
-            }
-            if (bias) {
-                float b_val;
-                if constexpr (std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t>) {
-                    b_val = utils::cast<float>(bias[n]);
-                } else {
-                    b_val = static_cast<float>(bias[n]);
-                }
-                sum += b_val;
-            }
-            if constexpr (std::is_same_v<T, bf16_t> || std::is_same_v<T, fp16_t>) {
-                out[m * N + n] = utils::cast<T>(sum);
-            } else {
-                out[m * N + n] = static_cast<T>(sum);
-            }
-        }
-    }
-}
 
 void linear(tensor_t out, tensor_t in, tensor_t weight, tensor_t bias) {
     CHECK_SAME_DEVICE(out, in, weight);
@@ -77,16 +38,8 @@ void linear(tensor_t out, tensor_t in, tensor_t weight, tensor_t bias) {
     std::byte *bias_ptr = bias ? bias->data() : nullptr;
 
     if (out->deviceType() == LLAISYS_DEVICE_CPU) {
-        switch (out->dtype()) {
-        case LLAISYS_DTYPE_F32:
-            return linear_cpu<float>(out->data(), in->data(), weight->data(), bias_ptr, M, K, N);
-        case LLAISYS_DTYPE_F16:
-            return linear_cpu<fp16_t>(out->data(), in->data(), weight->data(), bias_ptr, M, K, N);
-        case LLAISYS_DTYPE_BF16:
-            return linear_cpu<bf16_t>(out->data(), in->data(), weight->data(), bias_ptr, M, K, N);
-        default:
-            EXCEPTION_UNSUPPORTED_DATATYPE(out->dtype());
-        }
+        return cpu::linear(out->data(), in->data(), weight->data(), bias_ptr,
+                           out->dtype(), M, K, N);
     }
 
 #ifdef ENABLE_NVIDIA_API

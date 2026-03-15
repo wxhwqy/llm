@@ -27,6 +27,7 @@ import { getCoverGradient, timeAgo } from "@/lib/constants";
 import { cn, stripHtml } from "@/lib/utils";
 import { parseCharacterPng, parseCharacterJson } from "@/lib/parse-character-file";
 import { useImportStore } from "@/stores/import-store";
+import { useAuthStore } from "@/stores/auth-store";
 import type { CharacterSummary } from "@/types/character";
 
 function CoverImage({ character }: { character: CharacterSummary }) {
@@ -110,6 +111,7 @@ type ImportType = "sillytavern_png" | "json_import";
 
 export default function CharactersPage() {
   const router = useRouter();
+  const isAdmin = useAuthStore((s) => s.isAdmin());
   const [search, setSearch] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const debouncedSearch = useDebounce(search);
@@ -189,26 +191,28 @@ export default function CharactersPage() {
               选择一个角色开始对话
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="hidden sm:flex"
-              onClick={() => {
-                setImportError("");
-                setImportOpen(true);
-              }}
-            >
-              <Upload className="h-4 w-4 mr-1.5" />
-              导入
-            </Button>
-            <Link href="/characters/new/edit">
-              <Button size="sm" className="hidden sm:flex">
-                <Plus className="h-4 w-4 mr-1.5" />
-                新建
+          {isAdmin && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="hidden sm:flex"
+                onClick={() => {
+                  setImportError("");
+                  setImportOpen(true);
+                }}
+              >
+                <Upload className="h-4 w-4 mr-1.5" />
+                导入
               </Button>
-            </Link>
-          </div>
+              <Link href="/characters/new/edit">
+                <Button size="sm" className="hidden sm:flex">
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  新建
+                </Button>
+              </Link>
+            </div>
+          )}
         </div>
 
         <div className="space-y-3 mb-6">

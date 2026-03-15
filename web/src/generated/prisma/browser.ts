@@ -62,3 +62,8 @@ export type ChatMessage = Prisma.ChatMessageModel
  * 
  */
 export type TokenUsage = Prisma.TokenUsageModel
+/**
+ * Model LlmProvider
+ * 
+ */
+export type LlmProvider = Prisma.LlmProviderModel

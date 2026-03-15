@@ -52,6 +52,7 @@ import {
   useWorldBooks,
 } from "@/hooks/use-queries";
 import { useUiStore } from "@/stores/ui-store";
+import { useAuthGuard } from "@/hooks/use-require-auth";
 import { api } from "@/lib/api-client";
 import { mockApi } from "@/lib/mock-api";
 import type { ChatMessage } from "@/types/chat";
@@ -317,16 +318,27 @@ export default function ChatSessionPage({
 }) {
   const { sessionId } = use(params);
 
+  /* ---- auth guard ---- */
+  const { user: authUser, isLoading: authLoading } = useAuthGuard();
+
   /* ---- data fetching ---- */
   const { data: sessionsData } = useSessions();
   const { data: messagesData } = useMessages(sessionId);
   const { data: modelsData } = useModels();
   const { data: worldbooksData } = useWorldBooks("personal");
 
+  const router = useRouter();
   const sessions = sessionsData?.data ?? [];
   const session = sessions.find((s) => s.id === sessionId);
   const modelList = modelsData?.data ?? [];
   const personalBooks = worldbooksData?.data ?? [];
+
+  /* If sessions loaded but current session not found, redirect to /chat */
+  useEffect(() => {
+    if (sessionsData && !session) {
+      router.replace("/chat");
+    }
+  }, [sessionsData, session, router]);
 
   /* ---- stores ---- */
   const messages = useChatStore((s) => s.messages);

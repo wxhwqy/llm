@@ -3,6 +3,7 @@
 #include "../../core/llaisys_core.hpp"
 #include "../../utils.hpp"
 
+#include "cpu/sample_cpu.hpp"
 #ifdef ENABLE_NVIDIA_API
 #include "nvidia/sample_nvidia.cuh"
 #endif
@@ -22,6 +23,12 @@ void sample(tensor_t output_idx, tensor_t logits, tensor_t workspace,
     if (top_k < 0) top_k = 0;
     if (top_p <= 0.0f) top_p = 1.0f;
     if (top_p > 1.0f) top_p = 1.0f;
+
+    if (logits->deviceType() == LLAISYS_DEVICE_CPU) {
+        return cpu::sample(output_idx->data(), logits->data(), workspace->data(),
+                           logits->dtype(), vocab_size,
+                           temperature, top_k, top_p, seed);
+    }
 
 #ifdef ENABLE_NVIDIA_API
     if (logits->deviceType() == LLAISYS_DEVICE_NVIDIA) {

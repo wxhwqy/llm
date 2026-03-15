@@ -71,6 +71,21 @@ __global__ void self_attention_kernel(T *attn_val, const T *q, const T *k, const
     }
 }
 
+// Max dynamic shared memory per block on sm_89 (RTX 4090) is 100 KB.
+// Default limit is 48 KB = 12288 floats. To support kvlen up to 25600
+// (i.e. ~25K context), we opt-in to the extended shared memory.
+static constexpr size_t MAX_SMEM_BYTES = 100 * 1024;  // 100 KB
+
+template <typename T>
+static void set_max_smem_once(void (*kernel)(T*, const T*, const T*, const T*,
+                                             float, size_t, size_t, size_t, size_t, size_t)) {
+    static bool done = false;
+    if (!done) {
+        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, MAX_SMEM_BYTES);
+        done = true;
+    }
+}
+
 namespace llaisys::ops::nvidia {
 void self_attention(std::byte *attn_val, const std::byte *q, const std::byte *k,
                     const std::byte *v, float scale, llaisysDataType_t dtype,
@@ -81,18 +96,28 @@ void self_attention(std::byte *attn_val, const std::byte *q, const std::byte *k,
     if (threads > 1024) threads = 1024;
     size_t shared_size = kvlen * sizeof(float);
 
+    if (shared_size > MAX_SMEM_BYTES) {
+        throw std::runtime_error(
+            "self_attention: kvlen=" + std::to_string(kvlen) +
+            " requires " + std::to_string(shared_size) +
+            " bytes shared memory, exceeds limit " + std::to_string(MAX_SMEM_BYTES));
+    }
+
     switch (dtype) {
     case LLAISYS_DTYPE_F32:
+        set_max_smem_once(self_attention_kernel<float>);
         self_attention_kernel<<<grid, threads, shared_size>>>(
             (float *)attn_val, (const float *)q, (const float *)k, (const float *)v,
             scale, qlen, kvlen, nhead, nkvhead, hd);
         break;
     case LLAISYS_DTYPE_F16:
+        set_max_smem_once(self_attention_kernel<__half>);
         self_attention_kernel<<<grid, threads, shared_size>>>(
             (__half *)attn_val, (const __half *)q, (const __half *)k, (const __half *)v,
             scale, qlen, kvlen, nhead, nkvhead, hd);
         break;
     case LLAISYS_DTYPE_BF16:
+        set_max_smem_once(self_attention_kernel<__nv_bfloat16>);
         self_attention_kernel<<<grid, threads, shared_size>>>(
             (__nv_bfloat16 *)attn_val, (const __nv_bfloat16 *)q, (const __nv_bfloat16 *)k,
             (const __nv_bfloat16 *)v, scale, qlen, kvlen, nhead, nkvhead, hd);

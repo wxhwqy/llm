@@ -13,8 +13,11 @@ const defaultUser: User = {
   username: "Admin",
   email: "admin@example.com",
   role: "admin",
+  status: "active",
   createdAt: "2026-02-01T00:00:00.000Z",
 };
+
+let currentUser: User | null = defaultUser;
 
 // ──── Characters ────
 
@@ -211,7 +214,42 @@ export const mockApi = {
   // Auth
   async getMe(): Promise<ApiResponse<User>> {
     await delay(100);
-    return { data: defaultUser };
+    if (!currentUser) throw new Error("未登录");
+    return { data: currentUser };
+  },
+
+  async login(email: string, _password: string): Promise<ApiResponse<{ user: User }>> {
+    await delay(300);
+    if (email === "admin@example.com") {
+      currentUser = defaultUser;
+      return { data: { user: defaultUser } };
+    }
+    currentUser = { ...defaultUser, id: "usr_user1", username: "测试用户", email, role: "user", status: "active" };
+    return { data: { user: currentUser } };
+  },
+
+  async register(username: string, email: string, _password: string): Promise<ApiResponse<{ user: User }>> {
+    await delay(300);
+    currentUser = { id: `usr_${Date.now()}`, username, email, role: "user", status: "active", createdAt: new Date().toISOString() };
+    return { data: { user: currentUser } };
+  },
+
+  async logout(): Promise<ApiResponse<{ success: true }>> {
+    await delay(100);
+    currentUser = null;
+    return { data: { success: true } };
+  },
+
+  async updateProfile(data: { username?: string; email?: string }): Promise<ApiResponse<User>> {
+    await delay(200);
+    if (!currentUser) throw new Error("未登录");
+    currentUser = { ...currentUser, ...data };
+    return { data: currentUser };
+  },
+
+  async changePassword(): Promise<ApiResponse<{ success: true }>> {
+    await delay(200);
+    return { data: { success: true } };
   },
 
   // Characters

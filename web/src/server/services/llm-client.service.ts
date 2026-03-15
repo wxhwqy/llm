@@ -50,16 +50,61 @@ export async function getHealthStatus(): Promise<HealthResponse | null> {
   }
 }
 
+export async function chatCompletion(
+  messages: { role: string; content: string }[],
+  modelId: string,
+  provider?: { baseUrl: string; apiKey: string },
+  timeout?: number,
+): Promise<{ content: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
+  const baseUrl = provider?.baseUrl ?? config.llmServiceUrl;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (provider?.apiKey) {
+    headers["Authorization"] = `Bearer ${provider.apiKey}`;
+  }
+
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: modelId,
+      messages,
+      stream: false,
+      temperature: config.defaultTemperature,
+      max_tokens: config.defaultMaxTokens,
+    }),
+    signal: AbortSignal.timeout(timeout ?? 30_000),
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: { message: "推理服务异常" } }));
+    throw new ServiceUnavailableError(body?.error?.message ?? "推理服务异常");
+  }
+
+  const body = await res.json();
+  const choice = body.choices?.[0];
+  return {
+    content: choice?.message?.content ?? "",
+    usage: body.usage,
+  };
+}
+
 export async function streamChatCompletion(
   messages: { role: string; content: string }[],
   modelId: string,
   signal?: AbortSignal,
   sessionId?: string,
+  provider?: { baseUrl: string; apiKey: string },
 ): Promise<Response> {
+  const baseUrl = provider?.baseUrl ?? config.llmServiceUrl;
   try {
-    const res = await fetch(`${config.llmServiceUrl}/v1/chat/completions`, {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (provider?.apiKey) {
+      headers["Authorization"] = `Bearer ${provider.apiKey}`;
+    }
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         model: modelId,
         messages,

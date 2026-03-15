@@ -1,5 +1,6 @@
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import bcrypt from "bcryptjs";
 import path from "path";
 
 const dbPath = path.join(__dirname, "..", "dev.db");
@@ -10,18 +11,20 @@ async function main() {
   console.log("Seeding database...");
 
   // ─── Default Admin User ───
+  const passwordHash = await bcrypt.hash("admin123456", 12);
   const user = await prisma.user.upsert({
     where: { id: "usr_default" },
-    update: {},
+    update: { passwordHash },
     create: {
       id: "usr_default",
       username: "Admin",
       email: "admin@example.com",
-      passwordHash: "not-used-in-phase1",
+      passwordHash,
       role: "admin",
+      status: "active",
     },
   });
-  console.log("  User:", user.username);
+  console.log("  User:", user.username, "(password: admin123456)");
 
   // ─── Characters ───
   const chars = [
@@ -229,6 +232,24 @@ async function main() {
     update: {},
     create: { sessionId: "ses_3", worldBookId: "wb_4" },
   });
+
+  // ─── Default LLM Provider ───
+  const llmServiceUrl = process.env.LLM_SERVICE_URL || "http://localhost:8000";
+  await prisma.llmProvider.upsert({
+    where: { id: "prov_default" },
+    update: {},
+    create: {
+      id: "prov_default",
+      name: "本地推理服务",
+      baseUrl: llmServiceUrl,
+      apiKey: "",
+      models: "[]",
+      autoDiscover: true,
+      enabled: true,
+      priority: 10,
+    },
+  });
+  console.log(`  Default Provider: ${llmServiceUrl}`);
 
   console.log("Seed complete!");
 }

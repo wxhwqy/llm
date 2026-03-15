@@ -8,16 +8,27 @@ import type { PaginatedResponse, ApiResponse, CursorResponse } from "@/types/api
 import type { CharacterCard, CharacterSummary } from "@/types/character";
 import type { ChatSession, ChatMessage } from "@/types/chat";
 import type { WorldBookSummary, WorldBookDetail } from "@/types/worldbook";
-import type { User, TokenUsageStats, ModelInfo } from "@/types/user";
+import type { User, AdminUserItem, TokenUsageStats, ModelInfo } from "@/types/user";
+import { useAuthStore } from "@/stores/auth-store";
 
 export function useCurrentUser() {
+  const setUser = useAuthStore((s) => s.setUser);
   return useQuery({
     queryKey: ["auth", "me"],
-    queryFn: () =>
-      USE_MOCK
-        ? mockApi.getMe()
-        : api.get<ApiResponse<User>>("/auth/me"),
+    queryFn: async () => {
+      try {
+        const res = USE_MOCK
+          ? await mockApi.getMe()
+          : await api.get<ApiResponse<User>>("/auth/me");
+        setUser(res.data);
+        return res;
+      } catch {
+        setUser(null);
+        return { data: null as User | null };
+      }
+    },
     staleTime: Infinity,
+    retry: false,
   });
 }
 
@@ -241,5 +252,116 @@ export function useTokenUsage() {
     queryFn: () =>
       USE_MOCK ? mockApi.getUsage() : api.get<ApiResponse<TokenUsageStats>>("/users/me/usage"),
     staleTime: 60_000,
+  });
+}
+
+// ─── Auth Mutations ──────────────────────────────────────
+
+export function useLogin() {
+  const queryClient = useQueryClient();
+  const setUser = useAuthStore((s) => s.setUser);
+  return useMutation({
+    mutationFn: (data: { email: string; password: string }) =>
+      USE_MOCK
+        ? mockApi.login(data.email, data.password)
+        : api.post<ApiResponse<{ user: User }>>("/auth/login", data),
+    onSuccess: (res) => {
+      queryClient.clear();
+      setUser(res.data.user);
+      queryClient.setQueryData(["auth", "me"], { data: res.data.user });
+    },
+  });
+}
+
+export function useRegister() {
+  const queryClient = useQueryClient();
+  const setUser = useAuthStore((s) => s.setUser);
+  return useMutation({
+    mutationFn: (data: { username: string; email: string; password: string }) =>
+      USE_MOCK
+        ? mockApi.register(data.username, data.email, data.password)
+        : api.post<ApiResponse<{ user: User }>>("/auth/register", data),
+    onSuccess: (res) => {
+      queryClient.clear();
+      setUser(res.data.user);
+      queryClient.setQueryData(["auth", "me"], { data: res.data.user });
+    },
+  });
+}
+
+export function useLogout() {
+  const queryClient = useQueryClient();
+  const setUser = useAuthStore((s) => s.setUser);
+  return useMutation({
+    mutationFn: () =>
+      USE_MOCK
+        ? mockApi.logout()
+        : api.post<ApiResponse<{ success: true }>>("/auth/logout"),
+    onSuccess: () => {
+      setUser(null);
+      queryClient.clear();
+    },
+  });
+}
+
+export function useUpdateProfile() {
+  const queryClient = useQueryClient();
+  const setUser = useAuthStore((s) => s.setUser);
+  return useMutation({
+    mutationFn: (data: { username?: string; email?: string }) =>
+      USE_MOCK
+        ? mockApi.updateProfile(data)
+        : api.put<ApiResponse<User>>("/users/me", data),
+    onSuccess: (res) => {
+      setUser(res.data);
+      queryClient.setQueryData(["auth", "me"], { data: res.data });
+    },
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (data: { oldPassword: string; newPassword: string }) =>
+      USE_MOCK
+        ? mockApi.changePassword()
+        : api.put<ApiResponse<{ success: true }>>("/users/me/password", data),
+  });
+}
+
+// ─── Admin User Management ──────────────────────────────
+
+export function useAdminUsers(params?: { search?: string; role?: string; status?: string; page?: number }) {
+  return useQuery({
+    queryKey: ["admin", "users", params],
+    queryFn: () => {
+      const sp = new URLSearchParams();
+      if (params?.search) sp.set("search", params.search);
+      if (params?.role) sp.set("role", params.role);
+      if (params?.status) sp.set("status", params.status);
+      if (params?.page) sp.set("page", String(params.page));
+      return api.get<PaginatedResponse<AdminUserItem>>(`/admin/users?${sp}`);
+    },
+  });
+}
+
+export function useAdminUpdateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; role?: string; status?: string }) =>
+      api.put<ApiResponse<User>>(`/admin/users/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+  });
+}
+
+export function useAdminDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete<ApiResponse<{ deleted: true }>>(`/admin/users/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
   });
 }

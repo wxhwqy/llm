@@ -1,6 +1,6 @@
 # 聊天机器人项目 — 后端技术方案文档
 
-> 版本：0.4 | 最后更新：2026-03-14
+> 版本：0.7 | 最后更新：2026-03-14
 >
 > 对应 PRD 版本：0.3 | 对应 LLM Service API 版本：0.2
 
@@ -105,7 +105,7 @@ User ──1:N──► ChatSession ──1:N──► ChatMessage
 
 > 以下为 Prisma Schema 的关键部分，省略通用注解。
 
-**User**：id, username, email, passwordHash, role(USER/ADMIN), createdAt, updatedAt
+**User**：id, username, email, passwordHash, role(USER/ADMIN), **status(ACTIVE/DISABLED)**, createdAt, updatedAt
 
 **CharacterCard**：id, name, avatar?, coverImage?, description, personality, **preset**, scenario, systemPrompt, firstMessage, alternateGreetings[], exampleDialogue, creatorNotes, tags[], source(MANUAL/SILLYTAVERN_PNG/JSON_IMPORT), createdBy → User
 
@@ -126,6 +126,8 @@ User ──1:N──► ChatSession ──1:N──► ChatMessage
 
 **TokenUsage**：id, userId, sessionId, messageId, modelId, promptTokens, completionTokens, totalTokens, createdAt
 
+**LlmProvider**（v0.6 新增）：id, name, baseUrl, apiKey, models(JSON), autoDiscover, enabled, priority, createdAt, updatedAt
+
 ### 4.3 关键索引
 
 | 表 | 索引 | 用途 |
@@ -144,19 +146,88 @@ Phase 1-3 用 SQLite 开发（零配置），Phase 4 切 PostgreSQL。Prisma 自
 
 ## 5. 认证与授权
 
-### 5.1 分阶段策略
+### 5.1 认证实现
 
-- **Phase 1-3**：硬编码一个 `role=ADMIN` 的默认用户，数据库 seed 预置。所有请求自动以该身份执行，跳过登录
-- **Phase 4**：接入 NextAuth.js (Credentials Provider)。注册时 `bcrypt.hash(password, 12)`，登录后签发 JWT 写入 httpOnly Cookie（7 天过期）
+采用 JWT + bcrypt 方案，不依赖 NextAuth.js（减少黑盒依赖）：
 
-### 5.2 权限控制
+**注册流程**：
+1. Zod 校验用户名（2-20字符）、邮箱格式、密码强度（≥8字符）
+2. 检查用户名 / 邮箱唯一性，冲突返回 409
+3. `bcrypt.hash(password, 12)` 生成密码哈希
+4. 创建 User 记录（role 默认 `user`，status 默认 `active`）
+5. 签发 JWT，写入 httpOnly Cookie
+
+**登录流程**：
+1. 按 email 查找用户，不存在返回 401
+2. 检查 `status === "active"`，被禁用返回 403（"账号已被禁用"）
+3. `bcrypt.compare(password, passwordHash)` 校验密码
+4. 签发 JWT（payload: `{ userId, role }`，过期时间 7 天），写入 Cookie：
+   `Set-Cookie: auth-token=xxx; HttpOnly; Secure; SameSite=Lax; Max-Age=604800; Path=/`
+
+**JWT 校验（withAuth 中间件）**：
+1. 从 `req.cookies.get("auth-token")` 读取 token
+2. `jwt.verify(token, JWT_SECRET)` 解码
+3. 按 userId 查询用户，不存在或 status 非 active 返回 401
+4. 注入 user 到 handler 参数
+
+**登出**：清除 `auth-token` Cookie 即可。
+
+**密码修改**：
+1. 校验旧密码（bcrypt.compare）
+2. 哈希新密码并更新 DB
+
+### 5.2 用户管理（管理员）
+
+新增 `user.service.ts`，提供管理员用户管理功能：
+
+| 功能 | 说明 |
+|------|------|
+| 用户列表 | 支持按用户名/邮箱搜索、按角色/状态筛选、分页 |
+| 禁用/启用用户 | 设置 `status` 为 `disabled` / `active`。禁用后该用户的所有请求返回 403 |
+| 修改用户角色 | 将普通用户提升为管理员或反之。不能修改自己的角色（防止唯一管理员降权） |
+| 删除用户 | 级联删除该用户的所有会话、消息、token 记录。不能删除自己 |
+
+**安全约束**：
+- 管理员不能禁用/删除/降级自己
+- 至少保留一个 active 的 admin 用户
+- 删除用户是高危操作，需二次确认（前端实现）
+
+### 5.3 目录结构
+
+```
+server/
+├── services/
+│   └── user.service.ts          # 用户 CRUD + 认证逻辑
+├── db/repositories/
+│   └── user.repo.ts             # User 查询封装
+├── middleware/
+│   └── auth.ts                  # withAuth / withAdmin（JWT 校验）
+└── validators/
+    └── user.ts                  # Zod schemas（login / register / update）
+
+app/api/
+├── auth/
+│   ├── login/route.ts           # POST 登录
+│   ├── register/route.ts        # POST 注册
+│   ├── logout/route.ts          # POST 登出
+│   └── me/route.ts              # GET 当前用户
+├── users/me/
+│   ├── route.ts                 # PUT 更新个人资料
+│   ├── password/route.ts        # PUT 修改密码
+│   └── usage/route.ts           # GET Token 用量（已实现）
+└── admin/users/
+    ├── route.ts                 # GET 用户列表
+    └── [id]/route.ts            # PUT 更新用户 / DELETE 删除用户
+```
+
+### 5.4 权限控制
 
 通过 `withAuth` / `withAdmin` 两个高阶函数包裹 Route Handler：
 
-- `withAuth`：从 Cookie 解析 JWT，校验有效性，注入 user 到 handler 参数
-- `withAdmin`：在 `withAuth` 基础上检查 `user.role === ADMIN`
+- `withAuth`：从 Cookie 解析 JWT，查 DB 校验用户存在且 active，注入 user 到 handler 参数
+- `withAdmin`：在 `withAuth` 基础上检查 `user.role === "admin"`
 
-### 5.3 权限矩阵
+### 5.5 权限矩阵
 
 | 资源 | 操作 | 普通用户 | 管理员 |
 |------|------|---------|--------|
@@ -167,6 +238,8 @@ Phase 1-3 用 SQLite 开发（零配置），Phase 4 切 PostgreSQL。Prisma 自
 | 个人世界书 | 自己的 CRUD | ✅ | ✅ |
 | 聊天会话 | 自己的 CRUD | ✅ | ✅ |
 | 用户信息/用量 | 自己的 | ✅ | ✅ |
+| 用户管理 | 列表/禁用/角色/删除 | ❌ | ✅ |
+| LLM Provider | 列表/创建/编辑/删除/测试 | ❌ | ✅ |
 
 世界书 API 的权限逻辑：查询时自动返回「自己的个人世界书 + 所有全局世界书」；写操作时检查 scope 和归属关系。
 
@@ -363,6 +436,415 @@ streamChatCompletion(
 - 非流式请求 503/504 可重试 1 次，流式不重试
 - LLM Service 的错误码（context_length_exceeded / queue_full / queue_timeout / model_not_found）映射为后端对应的 HTTP 错误返回前端
 
+### 6.8 多 Provider 支持（v0.6）
+
+当前系统通过单一 `LLM_SERVICE_URL` 环境变量连接一个推理服务。v0.6 将支持管理员在后台配置多个 LLM Provider（如本地 vLLM、云端 OpenAI、DeepSeek 等），每个 Provider 可提供多个模型，用户在创建/切换会话时选择具体模型，系统自动路由到对应 Provider。
+
+#### 6.8.1 核心概念
+
+```
+LlmProvider（提供商配置）
+  ├── name: "本地 vLLM"
+  ├── baseUrl: "http://localhost:8000"
+  ├── apiKey: ""  (本地不需要)
+  ├── apiStyle: "openai"
+  └── models[] ──► 通过 /v1/models 自动发现，或手动配置
+
+LlmProvider（提供商配置）
+  ├── name: "DeepSeek"
+  ├── baseUrl: "https://api.deepseek.com"
+  ├── apiKey: "sk-xxx"  (加密存储)
+  ├── apiStyle: "openai"
+  └── models[] ──► 手动配置 ["deepseek-chat", "deepseek-reasoner"]
+```
+
+**apiStyle**：所有 Provider 统一使用 OpenAI-Compatible API 格式（`/v1/chat/completions`、`/v1/models`）。目前主流大模型平台（OpenAI、DeepSeek、智谱、Moonshot、本地 vLLM/Ollama）均兼容此格式，无需做格式适配。
+
+#### 6.8.2 数据库设计
+
+新增 `LlmProvider` 表：
+
+```prisma
+model LlmProvider {
+  id          String   @id @default(cuid())
+  name        String                           // 显示名称，如 "本地 vLLM"、"DeepSeek"
+  baseUrl     String                           // API 基础地址
+  apiKey      String   @default("")            // API Key（加密存储）
+  models      String   @default("[]")          // JSON: 手动配置的模型列表 [{id, name, maxContextLength}]
+  autoDiscover Boolean @default(true)          // 是否自动通过 /v1/models 发现模型
+  enabled     Boolean  @default(true)          // 是否启用
+  priority    Int      @default(0)             // 排序优先级（越大越靠前）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+```
+
+**字段说明**：
+
+| 字段 | 说明 |
+|------|------|
+| `baseUrl` | Provider 的 API 地址。本地服务填 `http://localhost:8000`，云端填 `https://api.deepseek.com` 等 |
+| `apiKey` | API 密钥。本地服务通常为空，云端服务必填。存储时使用 AES-256 加密，API 返回时脱敏为 `sk-***xxx` |
+| `models` | JSON 数组，手动配置的模型列表。每项包含 `{id, name, maxContextLength}`。对于不支持 `/v1/models` 的 Provider 或需要手动指定模型的场景 |
+| `autoDiscover` | 为 `true` 时，系统会定期调用 Provider 的 `GET /v1/models` 自动发现可用模型。自动发现的模型与手动配置的模型合并展示 |
+| `priority` | 当多个 Provider 提供同名模型时，按 priority 选择（高优先）。也用于前端模型列表排序 |
+
+#### 6.8.3 模型聚合与路由
+
+**模型列表聚合**（`GET /api/models`）：
+
+```
+1. 遍历所有 enabled 的 LlmProvider
+2. 对 autoDiscover=true 的 Provider，调用 GET {baseUrl}/v1/models（60s 缓存）
+3. 合并自动发现的模型 + 手动配置的模型
+4. 每个模型带上 providerId，按 priority 排序
+5. 返回给前端：[{ id, name, maxContextLength, status, providerId, providerName }]
+```
+
+**聊天路由**（发消息/重新生成时）：
+
+```
+1. 从 ChatSession 获取 modelId
+2. 在聚合的模型列表中查找 modelId → 找到对应 providerId
+3. 从 DB 加载该 Provider 的 baseUrl 和 apiKey
+4. 用该 Provider 的配置调用 streamChatCompletion()
+```
+
+**`llm-client.service.ts` 改造**：
+
+现有的 `streamChatCompletion()` 直接使用 `config.llmServiceUrl`，改造后接受 Provider 配置：
+
+```typescript
+// 改造前
+export async function streamChatCompletion(messages, modelId, signal?, sessionId?) {
+  const res = await fetch(`${config.llmServiceUrl}/v1/chat/completions`, { ... });
+}
+
+// 改造后
+export async function streamChatCompletion(
+  messages, modelId, signal?, sessionId?,
+  provider?: { baseUrl: string; apiKey: string }  // 新增
+) {
+  const baseUrl = provider?.baseUrl ?? config.llmServiceUrl;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (provider?.apiKey) {
+    headers["Authorization"] = `Bearer ${provider.apiKey}`;
+  }
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, { headers, ... });
+}
+```
+
+#### 6.8.4 兼容性与迁移
+
+- **向后兼容**：如果数据库中没有任何 LlmProvider 记录，系统回退到 `LLM_SERVICE_URL` 环境变量（即当前行为），确保无缝升级
+- **默认 Provider**：首次运行数据库 seed 时，如果 `LLM_SERVICE_URL` 有值，自动创建一个默认 Provider 记录
+- **API Key 安全**：API 响应中 apiKey 始终脱敏，仅在服务端内部使用明文
+
+#### 6.8.5 管理接口
+
+新增管理员 API（详见前端 API 文档）：
+
+| API | 方法 | 说明 |
+|-----|------|------|
+| `/api/admin/providers` | GET | 获取 Provider 列表 |
+| `/api/admin/providers` | POST | 新增 Provider |
+| `/api/admin/providers/:id` | PUT | 更新 Provider |
+| `/api/admin/providers/:id` | DELETE | 删除 Provider |
+| `/api/admin/providers/:id/test` | POST | 测试 Provider 连通性 |
+
+#### 6.8.6 目录结构新增
+
+```
+server/
+├── services/
+│   └── llm-client.service.ts    # 改造：支持多 Provider 路由
+├── db/repositories/
+│   └── provider.repo.ts         # LlmProvider 查询封装
+└── validators/
+    └── provider.ts              # Zod schemas
+
+app/api/
+└── admin/providers/
+    ├── route.ts                 # GET 列表 / POST 创建
+    └── [id]/
+        ├── route.ts             # PUT 更新 / DELETE 删除
+        └── test/route.ts        # POST 测试连通性
+```
+
+### 6.9 对话摘要压缩（v0.7）
+
+当上下文窗口接近满载时，通过 LLM 对旧对话生成摘要，替代原始消息注入 Prompt，在保留关键信息的同时释放 Token 空间。
+
+#### 6.9.1 触发条件
+
+在 `chat-stream.service.ts` 的 `onComplete` 回调中（即保存 assistant 消息之后），异步计算**下一轮 Prompt 预估 Token**：
+
+```
+nextRoundTokens = systemTokens + worldbookTokens + historyTokens（含刚保存的 assistant 消息）
+availableBudget = session.maxTokens - config.defaultMaxTokens（预留给回复）
+
+if nextRoundTokens >= availableBudget * 0.9:
+    触发压缩
+```
+
+**计算说明**：
+- `systemTokens`：角色卡 preset + systemPrompt + description + scenario + exampleDialogue + 世界书词条（即 `buildPrompt` 中 `role=system` 的消息）
+- `historyTokens`：当前 DB 中该 session 所有 `role=user|assistant` 的消息 tokenCount 之和
+- **不含用户下一轮输入**（无法预知），因此用 90% 而非 100% 作为阈值，留出余量
+
+> 压缩是**异步后台任务**，不阻塞当前 SSE 响应。当前轮直接返回，压缩完成后下一轮自动生效。如果用户在压缩进行中发送了新消息，新请求会等待压缩完成后再用更新后的上下文发送（详见 6.9.10）。
+
+#### 6.9.2 压缩范围与保留策略
+
+```
+全部对话消息（按时间升序）:
+[msg_1, msg_2, ..., msg_N]
+
+压缩区域（最早 70%）:     [msg_1, ..., msg_K]     → 送入 LLM 做摘要
+保留区域（最近 30%）:     [msg_K+1, ..., msg_N]   → 原样保留
+
+K = floor(N * 0.7)
+
+特别说明：K 向下取整到 user/assistant 对的边界，确保不会把一对对话拆开。
+```
+
+**绝对不压缩的内容**（这些由 `buildPrompt` 在每轮独立构建，不属于对话历史）：
+- 角色卡 preset（预设）
+- 角色卡 systemPrompt（系统提示词）
+- 角色卡 description + scenario（角色设定）
+- 角色卡 exampleDialogue（示例对话）
+- 世界书词条（每轮动态匹配注入）
+- `role=system` 的所有消息
+
+#### 6.9.3 摘要生成
+
+使用 LLM 非流式调用（`chatCompletion`）生成摘要：
+
+```typescript
+// llm-client.service.ts 新增非流式方法
+export async function chatCompletion(
+  messages: { role: string; content: string }[],
+  modelId: string,
+  provider?: { baseUrl: string; apiKey: string },
+): Promise<{ content: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }>
+```
+
+**摘要 Prompt 构建**：
+
+```
+messages = [
+  {
+    role: "system",
+    content: "你是一个对话摘要助手。请对以下角色扮演对话内容进行简洁摘要，保留关键情节、角色状态变化、重要约定和情感发展。摘要应以第三人称叙述，方便后续对话继续时作为上下文参考。"
+  },
+  {
+    role: "user",
+    content: "${existingSummary ? '[先前摘要]\n' + existingSummary + '\n\n' : ''}[对话内容]\n${对话文本}"
+  }
+]
+```
+
+**对话文本格式化**：将 `msg_1..msg_K` 格式化为：
+```
+用户: xxx
+角色: xxx
+用户: xxx
+角色: xxx
+...
+```
+
+**摘要使用的模型**：使用当前 session 绑定的 modelId 及其对应 Provider。后续可支持配置专用的摘要模型（如使用更快更便宜的模型）。
+
+#### 6.9.4 数据存储
+
+**方案：在 ChatSession 上新增 `contextSummary` 字段**
+
+```prisma
+model ChatSession {
+  // ... 现有字段 ...
+  contextSummary  String?   // 对话摘要文本（压缩后生成）
+}
+```
+
+**为什么不存在 ChatMessage 表**：摘要是会话级别的状态，不是一条独立的消息。多次压缩只保留一份最新摘要，存在 session 上更简洁。
+
+**被压缩的消息处理**：
+- 将被压缩的消息的 `isCompressed` 标记为 `true`（利用已有字段）
+- 在 `buildFinalMessages` 加载历史时，**跳过 `isCompressed=true` 的消息**
+- 被压缩的消息仍然保留在 DB 中（用户可查看完整历史），仅在 Prompt 构建时排除
+
+#### 6.9.5 Prompt 注入
+
+在 `prompt-builder.service.ts` 或 `chat-stream.service.ts` 的 `buildFinalMessages` 中，如果 session 存在 `contextSummary`，将其作为历史消息的前缀注入：
+
+```
+最终 Prompt 结构:
+messages[0]     = { role: "system", content: 角色卡 + 世界书 + ... }   ← 不变
+messages[1]     = { role: "system", content: "[对话回顾]\n" + contextSummary }  ← 新增
+messages[2..M]  = 未被压缩的历史消息（isCompressed=false）
+messages[M+1]   = { role: "user", content: 当前输入 }
+```
+
+> 摘要用独立的 system message 注入，而非拼接到角色卡的 system message 中，便于 Token 计算和后续管理。
+
+#### 6.9.6 多次压缩
+
+随着对话继续，可能再次触发压缩。此时：
+
+1. 从 DB 加载当前 `contextSummary`（先前的摘要）
+2. 加载所有 `isCompressed=false` 的历史消息，取最早 70%
+3. 将 **先前摘要 + 待压缩消息** 一并送入 LLM 生成新摘要
+4. 用新摘要 **替换** `contextSummary`（始终只保留一份）
+5. 将新一批消息标记为 `isCompressed=true`
+
+```
+第一次压缩:
+  [msg1..msg7] → 摘要 A，保留 [msg8..msg10]
+
+对话继续 → 触发第二次压缩:
+  [摘要A + msg8..msg12] → 摘要 B，保留 [msg13..msg15]
+
+DB 状态:
+  session.contextSummary = 摘要B
+  msg1..msg12.isCompressed = true
+  msg13..msg15.isCompressed = false
+```
+
+#### 6.9.7 实现步骤
+
+```
+文件变更清单:
+
+1. web/prisma/schema.prisma
+   - ChatSession 新增 contextSummary String?
+
+2. web/prisma/migrations/xxx_add_context_summary/
+   - 数据库迁移
+
+3. web/src/server/services/llm-client.service.ts
+   - 新增 chatCompletion() 非流式方法（摘要压缩 + 未来内部用途）
+
+4. web/src/server/services/compression.service.ts  (新建)
+   - shouldCompress(session, systemTokens, historyTokens): boolean
+   - startCompression(sessionId, modelId, provider): void  — 异步触发，Promise 存入 map
+   - waitForCompression(sessionId): Promise<void>  — 等待压缩完成（无压缩时立即返回）
+   - doCompress(sessionId, modelId, provider): Promise<void>  — 内部实现:
+     - 加载未压缩消息，按 70/30 分割
+     - 构建摘要 Prompt（含已有 contextSummary）
+     - 调用 chatCompletion 生成摘要（带 30s 超时）
+     - 更新 session.contextSummary
+     - 批量标记消息 isCompressed=true
+     - finally: 从 compressingMap 中移除
+
+5. web/src/server/services/chat-stream.service.ts
+   - sendMessageStream / regenerateStream 入口: await waitForCompression(sessionId)
+   - onComplete 回调中：保存 assistant 消息后，调用 shouldCompress 检查
+   - 触发时调用 startCompression（不阻塞当前 SSE 响应）
+
+6. web/src/server/services/chat-stream.service.ts (buildFinalMessages)
+   - 加载历史时过滤 isCompressed=true 的消息
+   - 如 session.contextSummary 存在，注入为 system message
+
+7. web/src/server/repositories/message.repository.ts
+   - findMessagesBySession 新增 isCompressed 过滤选项
+   - 新增 markMessagesCompressed(ids: string[]): 批量标记
+
+8. web/src/server/repositories/session.repository.ts
+   - findOwnedSessionWithCharacter 返回 contextSummary 字段
+```
+
+#### 6.9.8 配置项
+
+| 配置 | 默认值 | 说明 |
+|------|--------|------|
+| `COMPRESS_TRIGGER_THRESHOLD` | `0.9` | 预估下一轮 token 占比超过此值触发压缩 |
+| `COMPRESS_RATIO` | `0.7` | 压缩最早 70% 的对话消息 |
+
+#### 6.9.9 注意事项
+
+- **异步执行 + 请求门控**：压缩不阻塞当前轮 SSE 响应，但会阻塞下一轮请求直到压缩完成（详见 6.9.10）。压缩内部设置 30s 超时，超时后放弃压缩，阻塞的请求继续走滑动窗口兜底
+- **并发保护**：同一 session 同时只能有一个压缩任务，用 `Map<sessionId, Promise>` 管理。`startCompression` 检查 map 中是否已有该 session 的任务，有则跳过
+- **摘要质量**：Prompt 要求保留关键情节、角色状态、重要约定、情感发展。摘要过短会丢失信息，过长则失去压缩意义。经验值：压缩后摘要约为原文 15-25% 的 Token 量
+- **firstMessage 处理**：角色卡的 firstMessage 作为第一条 assistant 消息存在于历史中，压缩时正常包含在内（其关键信息会被摘要保留）
+- **Token 计数更新**：压缩完成后需要更新 session.usedTokens 的估算值
+
+#### 6.9.10 压缩期间的请求阻塞
+
+压缩是异步的，但用户可能在压缩尚未完成时就发送了下一条消息。如果不处理，新请求会用**压缩前的旧上下文**构建 Prompt，导致：
+- 压缩白做（旧上下文仍然超限，触发滑动窗口丢弃）
+- 压缩完成后 `isCompressed` 标记与已发送的 Prompt 不一致
+
+**解决方案：基于 Promise 的请求门控**
+
+```typescript
+// compression.service.ts
+
+// 每个 session 的压缩任务用 Promise 表示
+const compressingMap = new Map<string, Promise<void>>();
+
+// 触发压缩时，将 Promise 存入 map
+export function startCompression(sessionId: string, ...args): void {
+  const task = doCompress(sessionId, ...args)
+    .finally(() => compressingMap.delete(sessionId));
+  compressingMap.set(sessionId, task);
+}
+
+// 等待压缩完成（如果有正在进行的）
+export async function waitForCompression(sessionId: string): Promise<void> {
+  const task = compressingMap.get(sessionId);
+  if (task) await task;
+}
+```
+
+**在聊天请求入口处等待**：
+
+```typescript
+// chat-stream.service.ts → sendMessageStream()
+
+export async function sendMessageStream(sessionId, userId, content, abortSignal?) {
+  // ① 如果该 session 正在压缩，阻塞等待完成
+  await waitForCompression(sessionId);
+
+  // ② 压缩完成（或无压缩），继续正常流程
+  const session = await sessionRepo.findOwnedSessionWithCharacter(sessionId, userId);
+  // ... 保存用户消息、构建 Prompt、调用 LLM ...
+}
+```
+
+**时序示意**：
+
+```
+用户轮次 N:
+  ├── [1] 收到 assistant 回复，保存消息
+  ├── [2] 检测到需压缩 → startCompression(sessionId)
+  │       压缩任务开始（异步，不阻塞 SSE 返回）
+  └── [3] SSE 响应完成，返回给前端 ✓
+
+用户轮次 N+1（压缩仍在进行中）:
+  ├── [4] 用户发送新消息 → sendMessageStream()
+  ├── [5] await waitForCompression(sessionId)  ← 阻塞在此
+  │       ...压缩任务完成: contextSummary 已写入, 消息已标记 isCompressed...
+  ├── [6] 阻塞解除，继续执行
+  ├── [7] 加载历史（此时 isCompressed=true 的已过滤，contextSummary 已注入）
+  └── [8] 用压缩后的上下文构建 Prompt → 调用 LLM ✓
+```
+
+**关键细节**：
+
+- `waitForCompression` 是一个简单的 `await`，不会轮询。如果没有正在进行的压缩，直接通过（`Map.get` 返回 `undefined`）
+- 用户发送消息时保存 `user message` 到 DB 应该在 `waitForCompression` **之后**，这样保存的消息不会被当前正在进行的压缩所影响
+- 压缩超时保护：`doCompress` 内部设置超时（如 30s），超时后 Promise reject，`finally` 清理 map，阻塞的请求继续执行（用未压缩的上下文兜底，走滑动窗口裁剪）
+- `regenerateStream` 同理，入口处也需要 `await waitForCompression(sessionId)`
+
+**对前端的影响**：
+
+- 前端无需感知压缩过程。请求发出后如果被阻塞，表现为 SSE 连接建立后短暂等待才开始收到数据（类似 LLM 推理延迟）
+- 如果需要更好的体验，可在 `waitForCompression` 之前先发一个 SSE 事件通知前端正在整理上下文：
+  ```json
+  { "type": "compressing", "message": "正在整理对话上下文..." }
+  ```
+  前端收到后可展示一个轻量提示，但这是**可选优化**，不实现也不影响功能正确性
+
 ---
 
 ## 7. API 设计要点
@@ -406,13 +888,41 @@ streamChatCompletion(
 | 新增 Repository 层 | `session.repo.ts` + `message.repo.ts` 封装数据库查询和归属校验，Service 不再直接调用 Prisma |
 | LLM 调用新增 `session_id` | `streamChatCompletion()` 向 LLM Service 传递 `session_id`（值为 ChatSession ID），用于会话级状态管理 |
 
-**v0.4（本次）：**
+**v0.4：**
 
 | 变更项 | 说明 |
 |--------|------|
 | CharacterCard 新增 `preset` 字段 | 角色卡预设文本，在 Prompt 中位于 system message 最前面。用于注入跨角色的通用规则（输出语言、角色扮演规范等）。DB 层为 `String @default("")`，API 层为可选字段 |
 | `description` / `personality` 字段语义修正 | `description` = 角色定义（给 AI 用，进 prompt）；`personality` = 角色介绍（给用户看，前端展示）。prompt-builder 改为读取 `description` 而非 `personality` |
 | Prompt 构建顺序调整 | system message 内容顺序变为：preset → BEFORE_SYSTEM 世界书 → systemPrompt → 角色设定(description+scenario) → AFTER_SYSTEM 世界书 → 示例对话 |
+
+**v0.5（本次）：**
+
+| 变更项 | 说明 |
+|--------|------|
+| 用户管理模块 | 新增 `user.service.ts` + `user.repo.ts`，实现完整的用户认证（JWT + bcrypt）和管理员用户管理（列表/禁用/角色/删除） |
+| User 模型新增 `status` 字段 | `String @default("active")`，值为 `active` / `disabled`。禁用用户所有请求返回 403 |
+| auth 中间件重写 | 从硬编码默认用户改为真实 JWT 校验 + DB 查询，校验 status |
+| 新增 API 路由 | `PUT /api/users/me`（更新资料）、`PUT /api/users/me/password`（修改密码）、`GET /api/admin/users`（用户列表）、`PUT /api/admin/users/:id`（管理用户）、`DELETE /api/admin/users/:id`（删除用户） |
+| 数据库 seed | 预置一个管理员账号 `admin@example.com`（密码 `admin123456`），用于首次登录 |
+
+**v0.6：**
+
+| 变更项 | 说明 |
+|--------|------|
+| 多 Provider 支持 | 新增 `LlmProvider` 数据表和管理 API，支持管理员配置多个 LLM 推理服务（本地 vLLM、云端 OpenAI/DeepSeek 等）。模型列表聚合所有 Provider，聊天时自动路由到对应 Provider |
+| 角色卡接口改为公开 | `GET /api/characters`、`GET /api/characters/:id`、`GET /api/characters/tags` 改为无需登录即可访问。未登录用户可浏览角色卡，登录校验延迟到发起对话、查看个人信息等操作 |
+| 新增 Provider 管理 API | `GET/POST /api/admin/providers`、`PUT/DELETE /api/admin/providers/:id`、`POST /api/admin/providers/:id/test`（管理员权限） |
+
+**v0.7（本次）：**
+
+| 变更项 | 说明 |
+|--------|------|
+| 对话摘要压缩 | 上下文窗口接近满载（≥90%）时，LLM 自动对最早 70% 对话生成摘要，替代原始消息注入 Prompt。多次压缩时将先前摘要与新对话一并重新总结，始终只保留一份摘要 |
+| ChatSession 新增 `contextSummary` 字段 | 存储 LLM 生成的对话摘要，用于下一轮 Prompt 构建时注入 |
+| llm-client 新增 `chatCompletion()` | 非流式 LLM 调用方法，用于摘要压缩等内部用途 |
+| 压缩期间请求门控 | 基于 `Map<sessionId, Promise>` 的并发控制，压缩进行中用户发送的新消息会阻塞等待压缩完成后再用更新后的上下文发送 |
+| 新增配置项 | `SUMMARY_COMPRESS_TRIGGER`（0.9）、`SUMMARY_COMPRESS_RATIO`（0.7）、`SUMMARY_COMPRESS_TIMEOUT`（30s） |
 
 ### 7.4 分页策略
 
@@ -544,7 +1054,9 @@ GET /api/worldbooks 的可见范围:
 | `MAX_CONCURRENT_INFERENCES` | `1` | 后端最大并发推理数 |
 | `MAX_QUEUE_SIZE` | `10` | 最大排队数 |
 | `WORLDBOOK_TOKEN_BUDGET_RATIO` | `0.25` | 世界书 Token 预算占比 |
-| `CONTEXT_COMPRESS_THRESHOLD` | `0.8` | 触发压缩的上下文使用率阈值 |
+| `CONTEXT_COMPRESS_THRESHOLD` | `0.8` | 滑动窗口裁剪的上下文使用率阈值 |
+| `SUMMARY_COMPRESS_TRIGGER` | `0.9` | 触发 LLM 摘要压缩的上下文使用率阈值 |
+| `SUMMARY_COMPRESS_RATIO` | `0.7` | 摘要压缩时处理最早对话的比例 |
 | `WORLDBOOK_SCAN_ROUNDS` | `5` | 世界书关键词匹配的扫描轮数 |
 | `UPLOAD_DIR` | `./uploads` | 文件上传目录 |
 | `MAX_UPLOAD_SIZE_MB` | `10` | 最大上传文件大小 |

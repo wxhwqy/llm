@@ -5,6 +5,8 @@ import { buildPrompt } from "./prompt-builder.service";
 import { applyContextWindow } from "./context-manager.service";
 import { createLLMStream, type StreamResult } from "./sse-stream.service";
 import { formatMessage } from "./session.service";
+import { resolveProviderForModel } from "./provider.service";
+import { waitForCompression, shouldCompress, startCompression } from "./compression.service";
 import * as sessionRepo from "../repositories/session.repository";
 import * as messageRepo from "../repositories/message.repository";
 
@@ -16,6 +18,7 @@ interface SessionWithCharacter {
   modelId: string;
   usedTokens: number;
   maxTokens: number;
+  contextSummary: string | null;
   character: {
     preset: string;
     systemPrompt: string;
@@ -48,11 +51,37 @@ async function buildFinalMessages(
     userInput,
   });
 
+  // Inject context summary after the character system message
+  if (session.contextSummary) {
+    const systemMessages = llmMessages.filter((m) => m.role === "system");
+    const nonSystemMessages = llmMessages.filter((m) => m.role !== "system");
+    const summaryMessage = { role: "system", content: `[对话回顾]\n${session.contextSummary}` };
+
+    const systemTokens = estimateMessagesTokens([...systemMessages, summaryMessage]);
+    const trimmed = applyContextWindow(nonSystemMessages, session.maxTokens, systemTokens);
+    return [...systemMessages, summaryMessage, ...trimmed];
+  }
+
   const systemTokens = estimateMessagesTokens(llmMessages.filter((m) => m.role === "system"));
   const historyPortion = llmMessages.filter((m) => m.role !== "system");
   const trimmed = applyContextWindow(historyPortion, session.maxTokens, systemTokens);
 
   return [...llmMessages.filter((m) => m.role === "system"), ...trimmed];
+}
+
+/**
+ * After saving assistant message, check if we need to trigger compression
+ * for the next round. Fires async — does not block the current response.
+ */
+function checkAndTriggerCompression(
+  session: SessionWithCharacter,
+  allHistoryTokens: number,
+  systemTokens: number,
+  provider?: { baseUrl: string; apiKey: string },
+) {
+  if (shouldCompress(session.maxTokens, systemTokens, allHistoryTokens)) {
+    startCompression(session.id, session.modelId, provider);
+  }
 }
 
 async function saveAssistantMessage(
@@ -99,6 +128,9 @@ export async function sendMessageStream(
   content: string,
   abortSignal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
+  // Wait for any in-progress compression to finish
+  await waitForCompression(sessionId);
+
   const session = await sessionRepo.findOwnedSessionWithCharacter(sessionId, userId);
 
   // Save user message
@@ -109,17 +141,27 @@ export async function sendMessageStream(
     tokenCount: estimateTokens(content),
   });
 
-  // Load history (skip just-inserted user message — it goes in prompt as userInput)
+  // Load history: only uncompressed messages, skip just-inserted user message
   const history = await messageRepo.findMessagesBySession(sessionId, {
     excludeId: userMsg.id,
-    select: { role: true, content: true },
+    select: { role: true, content: true, isCompressed: true },
   });
+  const uncompressedHistory = (history as { role: string; content: string; isCompressed: boolean }[])
+    .filter((m) => !m.isCompressed);
+
+  const sessionWithChar = session as unknown as SessionWithCharacter;
 
   const finalMessages = await buildFinalMessages(
-    session as unknown as SessionWithCharacter,
-    history as { role: string; content: string }[],
+    sessionWithChar,
+    uncompressedHistory as { role: string; content: string }[],
     content,
   );
+
+  // Resolve provider for this model
+  const provider = await resolveProviderForModel(session.modelId);
+
+  // Calculate system tokens for compression check (used in onComplete)
+  const systemTokens = estimateMessagesTokens(finalMessages.filter((m) => m.role === "system"));
 
   return createLLMStream(finalMessages, session.modelId, {
     onBeforeStream: (send) => {
@@ -134,8 +176,13 @@ export async function sendMessageStream(
         message: formatMessage(assistantMsg),
         contextUsage: { usedTokens: newUsedTokens, maxTokens },
       }));
+
+      // Check if next round needs compression (async, non-blocking)
+      const allUncompressed = await messageRepo.findUncompressedMessages(sessionId);
+      const historyTokens = allUncompressed.reduce((sum, m) => sum + m.tokenCount, 0);
+      checkAndTriggerCompression(sessionWithChar, historyTokens, systemTokens, provider ?? undefined);
     },
-  }, { abortSignal, sessionId });
+  }, { abortSignal, sessionId, provider: provider ?? undefined });
 }
 
 // ─── Regenerate ──────────────────────────────────────────
@@ -146,6 +193,9 @@ export async function regenerateStream(
   modelId?: string,
   abortSignal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
+  // Wait for any in-progress compression to finish
+  await waitForCompression(sessionId);
+
   await sessionRepo.findOwnedSession(sessionId, userId);
 
   // Delete last assistant message
@@ -169,17 +219,24 @@ export async function regenerateStream(
   const sessionWithChar = await sessionRepo.findOwnedSessionWithCharacter(sessionId, userId);
 
   const history = await messageRepo.findMessagesBySession(sessionId, {
-    select: { role: true, content: true },
+    select: { role: true, content: true, isCompressed: true },
   });
 
-  const nonSystemHistory = (history as { role: string; content: string }[]).filter((m) => m.role !== "system");
+  const uncompressedHistory = (history as { role: string; content: string; isCompressed: boolean }[])
+    .filter((m) => !m.isCompressed && m.role !== "system");
   const finalMessages = await buildFinalMessages(
     sessionWithChar as unknown as SessionWithCharacter,
-    nonSystemHistory.slice(0, -1), // all except last user msg (it becomes userInput)
+    uncompressedHistory.slice(0, -1), // all except last user msg (it becomes userInput)
     lastUser.content,
   );
 
   const effectiveModelId = modelId || sessionWithChar.modelId;
+
+  // Resolve provider for this model
+  const provider = await resolveProviderForModel(effectiveModelId);
+
+  // Calculate system tokens for compression check
+  const systemTokens = estimateMessagesTokens(finalMessages.filter((m) => m.role === "system"));
 
   return createLLMStream(finalMessages, effectiveModelId, {
     onComplete: async (send, result) => {
@@ -191,6 +248,14 @@ export async function regenerateStream(
         message: formatMessage(assistantMsg),
         contextUsage: { usedTokens: newUsedTokens, maxTokens },
       }));
+
+      // Check if next round needs compression (async, non-blocking)
+      const allUncompressed = await messageRepo.findUncompressedMessages(sessionId);
+      const historyTokens = allUncompressed.reduce((sum, m) => sum + m.tokenCount, 0);
+      checkAndTriggerCompression(
+        sessionWithChar as unknown as SessionWithCharacter,
+        historyTokens, systemTokens, provider ?? undefined,
+      );
     },
-  }, { abortSignal, sessionId });
+  }, { abortSignal, sessionId, provider: provider ?? undefined });
 }

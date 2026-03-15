@@ -392,7 +392,8 @@ export const ModelName = {
   SessionWorldBook: 'SessionWorldBook',
   ChatSession: 'ChatSession',
   ChatMessage: 'ChatMessage',
-  TokenUsage: 'TokenUsage'
+  TokenUsage: 'TokenUsage',
+  LlmProvider: 'LlmProvider'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -408,7 +409,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "user" | "characterCard" | "worldBook" | "worldBookEntry" | "characterWorldBook" | "sessionWorldBook" | "chatSession" | "chatMessage" | "tokenUsage"
+    modelProps: "user" | "characterCard" | "worldBook" | "worldBookEntry" | "characterWorldBook" | "sessionWorldBook" | "chatSession" | "chatMessage" | "tokenUsage" | "llmProvider"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1078,6 +1079,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    LlmProvider: {
+      payload: Prisma.$LlmProviderPayload<ExtArgs>
+      fields: Prisma.LlmProviderFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.LlmProviderFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.LlmProviderFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>
+        }
+        findFirst: {
+          args: Prisma.LlmProviderFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.LlmProviderFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>
+        }
+        findMany: {
+          args: Prisma.LlmProviderFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>[]
+        }
+        create: {
+          args: Prisma.LlmProviderCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>
+        }
+        createMany: {
+          args: Prisma.LlmProviderCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.LlmProviderCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>[]
+        }
+        delete: {
+          args: Prisma.LlmProviderDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>
+        }
+        update: {
+          args: Prisma.LlmProviderUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>
+        }
+        deleteMany: {
+          args: Prisma.LlmProviderDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.LlmProviderUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.LlmProviderUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>[]
+        }
+        upsert: {
+          args: Prisma.LlmProviderUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LlmProviderPayload>
+        }
+        aggregate: {
+          args: Prisma.LlmProviderAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateLlmProvider>
+        }
+        groupBy: {
+          args: Prisma.LlmProviderGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.LlmProviderGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.LlmProviderCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.LlmProviderCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -1120,6 +1195,7 @@ export const UserScalarFieldEnum = {
   email: 'email',
   passwordHash: 'passwordHash',
   role: 'role',
+  status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -1205,6 +1281,7 @@ export const ChatSessionScalarFieldEnum = {
   title: 'title',
   usedTokens: 'usedTokens',
   maxTokens: 'maxTokens',
+  contextSummary: 'contextSummary',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -1239,6 +1316,22 @@ export const TokenUsageScalarFieldEnum = {
 } as const
 
 export type TokenUsageScalarFieldEnum = (typeof TokenUsageScalarFieldEnum)[keyof typeof TokenUsageScalarFieldEnum]
+
+
+export const LlmProviderScalarFieldEnum = {
+  id: 'id',
+  name: 'name',
+  baseUrl: 'baseUrl',
+  apiKey: 'apiKey',
+  models: 'models',
+  autoDiscover: 'autoDiscover',
+  enabled: 'enabled',
+  priority: 'priority',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type LlmProviderScalarFieldEnum = (typeof LlmProviderScalarFieldEnum)[keyof typeof LlmProviderScalarFieldEnum]
 
 
 export const SortOrder = {
@@ -1401,6 +1494,7 @@ export type GlobalOmitConfig = {
   chatSession?: Prisma.ChatSessionOmit
   chatMessage?: Prisma.ChatMessageOmit
   tokenUsage?: Prisma.TokenUsageOmit
+  llmProvider?: Prisma.LlmProviderOmit
 }
 
 /* Types for Logging */

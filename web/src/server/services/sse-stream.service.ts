@@ -41,7 +41,7 @@ export function createLLMStream(
   messages: { role: string; content: string }[],
   modelId: string,
   callbacks: StreamCallbacks,
-  opts?: { abortSignal?: AbortSignal; sessionId?: string },
+  opts?: { abortSignal?: AbortSignal; sessionId?: string; provider?: { baseUrl: string; apiKey: string } },
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
@@ -61,6 +61,7 @@ export function createLLMStream(
           modelId,
           opts?.abortSignal,
           opts?.sessionId,
+          opts?.provider,
         );
         const reader = llmResponse.body!.getReader();
         const decoder = new TextDecoder();

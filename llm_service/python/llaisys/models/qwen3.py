@@ -48,7 +48,7 @@ class Qwen3:
         self.rms_norm_eps = config["rms_norm_eps"]
         self.rope_theta = config.get("rope_theta", 1000000.0)
         self.eos_token_id = config["eos_token_id"]
-        self.max_seq_len = min(config.get("max_position_embeddings", 131072), 8192)###############
+        self.max_seq_len = min(config.get("max_position_embeddings", 131072), 16384)
 
         quant_config = config.get("quantization_config", {})
         self.use_fp8 = quant_config.get("quant_method") == "fp8"
