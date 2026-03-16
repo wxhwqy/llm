@@ -1,5 +1,5 @@
-local nccl_include = os.getenv("NCCL_INCLUDE") or "/usr/include"
-local nccl_lib = os.getenv("NCCL_LIB") or "/usr/lib/x86_64-linux-gnu"
+local nccl_include = os.getenv("NCCL_INCLUDE") or "/home/lma/anaconda3/lib/python3.13/site-packages/nvidia/nccl/include"
+local nccl_lib = os.getenv("NCCL_LIB") or "/home/lma/anaconda3/lib/python3.13/site-packages/nvidia/nccl/lib"
 
 target("llaisys-device-nvidia")
     set_kind("static")

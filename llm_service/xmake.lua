@@ -3,8 +3,10 @@ set_encodings("utf-8")
 
 add_includedirs("include")
 
-local nccl_include = os.getenv("NCCL_INCLUDE") or "/usr/include"
-local nccl_lib = os.getenv("NCCL_LIB") or "/usr/lib/x86_64-linux-gnu"
+local nccl_include = os.getenv("NCCL_INCLUDE") or "/home/lma/anaconda3/lib/python3.13/site-packages/nvidia/nccl/include"
+local nccl_lib = os.getenv("NCCL_LIB") or "/home/lma/anaconda3/lib/python3.13/site-packages/nvidia/nccl/lib"
+local cuda_home = os.getenv("CUDA_HOME")
+local cuda_include = os.getenv("CUDA_INCLUDE") or (cuda_home and (cuda_home .. "/include")) or "/usr/local/cuda-12.5/targets/x86_64-linux/include"
 
 -- CPU --
 includes("xmake/cpu.lua")
@@ -78,6 +80,7 @@ target("llaisys-ops")
     add_deps("llaisys-ops-cpu")
     if has_config("nv-gpu") then
         add_deps("llaisys-ops-nvidia")
+        add_includedirs(cuda_include)
     end
     set_languages("cxx17")
     set_warnings("all", "error")
@@ -99,7 +102,7 @@ target("llaisys-models")
     end
     if has_config("nv-gpu") then
         add_includedirs(nccl_include)
-        add_includedirs("/usr/local/cuda/include")
+        add_includedirs(cuda_include)
         add_files("src/models/*.cpp")
     else
         add_files("src/models/*.cpp|qwen3_tp.cpp")
@@ -119,7 +122,7 @@ target("llaisys")
     set_warnings("all", "error")
     if has_config("nv-gpu") then
         add_includedirs(nccl_include)
-        add_includedirs("/usr/local/cuda/include")
+        add_includedirs(cuda_include)
     end
     add_files("src/llaisys/*.cc")
     if has_config("nv-gpu") then
