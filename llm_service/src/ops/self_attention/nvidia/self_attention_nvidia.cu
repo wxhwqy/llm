@@ -143,17 +143,32 @@ __global__ void self_attention_gated_kernel(T *attn_val, const T *q, const T *k,
     }
 }
 
-// Max dynamic shared memory per block on sm_89 (RTX 4090) is 100 KB.
-// Default limit is 48 KB = 12288 floats. To support kvlen up to 25600
-// (i.e. ~25K context), we opt-in to the extended shared memory.
-static constexpr size_t MAX_SMEM_BYTES = 100 * 1024;  // 100 KB
+// Query the actual max shared memory per block (opt-in) for the current device.
+// Default limit is 48 KB; modern GPUs support much more via opt-in.
+static size_t getMaxSmemPerBlock() {
+    static size_t cached = 0;
+    if (cached == 0) {
+        int device;
+        cudaGetDevice(&device);
+        int val = 0;
+        cudaDeviceGetAttribute(&val, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+        cached = (val > 0) ? (size_t)val : 48 * 1024;  // fallback to 48KB
+    }
+    return cached;
+}
 
 template <typename Func>
 static void set_max_smem_once(Func kernel) {
     static bool done = false;
     if (!done) {
-        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, MAX_SMEM_BYTES);
-        done = true;
+        size_t max_smem = getMaxSmemPerBlock();
+        cudaError_t err = cudaFuncSetAttribute(
+            kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)max_smem);
+        if (err == cudaSuccess) {
+            done = true;
+        } else {
+            cudaGetLastError();  // clear error state
+        }
     }
 }
 
@@ -167,11 +182,12 @@ void self_attention(std::byte *attn_val, const std::byte *q, const std::byte *k,
     if (threads > 1024) threads = 1024;
     size_t shared_size = kvlen * sizeof(float);
 
-    if (shared_size > MAX_SMEM_BYTES) {
+    size_t max_smem = getMaxSmemPerBlock();
+    if (shared_size > max_smem) {
         throw std::runtime_error(
             "self_attention: kvlen=" + std::to_string(kvlen) +
             " requires " + std::to_string(shared_size) +
-            " bytes shared memory, exceeds limit " + std::to_string(MAX_SMEM_BYTES));
+            " bytes shared memory, exceeds device limit " + std::to_string(max_smem));
     }
 
     switch (dtype) {
@@ -209,11 +225,12 @@ void self_attention_gated(std::byte *attn_val, const std::byte *q, const std::by
     if (threads > 1024) threads = 1024;
     size_t shared_size = kvlen * sizeof(float);
 
-    if (shared_size > MAX_SMEM_BYTES) {
+    size_t max_smem = getMaxSmemPerBlock();
+    if (shared_size > max_smem) {
         throw std::runtime_error(
             "self_attention_gated: kvlen=" + std::to_string(kvlen) +
             " requires " + std::to_string(shared_size) +
-            " bytes shared memory, exceeds limit " + std::to_string(MAX_SMEM_BYTES));
+            " bytes shared memory, exceeds device limit " + std::to_string(max_smem));
     }
 
     switch (dtype) {
