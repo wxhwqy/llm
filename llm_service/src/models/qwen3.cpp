@@ -137,11 +137,15 @@ void Qwen3Model::allocateBuffers(size_t max_batch_seq) {
 
 void Qwen3Model::resetCache() {
     cache_len_ = 0;
+    token_history_.clear();
 }
 
 void Qwen3Model::setCacheLen(size_t len) {
     ASSERT(len <= config_.max_seq_len, "cache_len exceeds max_seq_len");
     cache_len_ = len;
+    if (len < token_history_.size()) {
+        token_history_.resize(len);
+    }
 }
 
 void Qwen3Model::linearFP8(tensor_t out, tensor_t in, const Qwen3FP8Linear &fp8,
@@ -350,6 +354,11 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
         ops::linear(logits_, normed_last, weights_.lm_head, nullptr);
     }
 
+    // Record input tokens in history
+    for (size_t i = 0; i < num_tokens; i++) {
+        token_history_.push_back(token_ids[i]);
+    }
+
     {
         ScopedOpTimer _t(profiler_, "sampling", 0);
         LLAISYS_NVTX_RANGE("sampling");
@@ -357,7 +366,9 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
         bool use_sampling = (temperature > 0.0f) && (top_k != 1);
         if (use_sampling) {
             ops::sample(max_idx_, logits_flat, sample_workspace_,
-                        temperature, top_k, top_p, seed);
+                        temperature, top_k, top_p, seed,
+                        token_history_.data(), token_history_.size(),
+                        repetition_penalty_);
         } else {
             ops::argmax(max_idx_, max_val_, logits_flat);
         }
@@ -367,6 +378,8 @@ int64_t Qwen3Model::infer(const int64_t *token_ids, size_t num_tokens,
     auto api = core::context().runtime().api();
     api->memcpy_sync(&next_token, max_idx_->data(), sizeof(int64_t), LLAISYS_MEMCPY_D2H);
 
+    // Record the generated token
+    token_history_.push_back(next_token);
     cache_len_ = start_pos + num_tokens;
 
     profiler_.endInfer();

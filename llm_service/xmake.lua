@@ -100,8 +100,10 @@ target("llaisys-models")
     if has_config("nv-gpu") then
         add_includedirs(nccl_include)
         add_includedirs("/usr/local/cuda/include")
+        add_files("src/models/*.cpp")
+    else
+        add_files("src/models/*.cpp|qwen3_tp.cpp")
     end
-    add_files("src/models/*.cpp")
     on_install(function (target) end)
 target_end()
 

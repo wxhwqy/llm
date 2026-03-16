@@ -1,6 +1,30 @@
 import { UnprocessableError } from "../lib/errors";
 import { saveBufferAsFile } from "./upload.service";
 import { createCharacter } from "./character.service";
+import { createWorldbook } from "./worldbook.service";
+import { prisma } from "../db/prisma";
+
+// ─── SillyTavern Character Book types ────────────────────
+
+interface STCharacterBookEntry {
+  keys?: string[];
+  key?: string[];
+  secondary_keys?: string[];
+  content?: string;
+  enabled?: boolean;
+  disable?: boolean;
+  insertion_order?: number;
+  order?: number;
+  priority?: number;
+  position?: string | number;
+  extensions?: Record<string, unknown>;
+}
+
+interface STCharacterBook {
+  name?: string;
+  description?: string;
+  entries: Record<string, STCharacterBookEntry> | STCharacterBookEntry[];
+}
 
 interface STCharacterCardV2 {
   spec?: string;
@@ -17,7 +41,7 @@ interface STCharacterCardV2 {
     creator_notes?: string;
     tags?: string[];
     post_history_instructions?: string;
-    character_book?: unknown;
+    character_book?: STCharacterBook;
   };
 }
 
@@ -83,6 +107,70 @@ function mapSTCard(st: STCharacterCardV2) {
   };
 }
 
+/**
+ * Map SillyTavern character_book position field to our internal position string.
+ * ST uses numbers: 0 = before_char (after_system), 1 = after_char (after_system),
+ * or string values. Default to "after_system".
+ */
+function mapEntryPosition(pos?: string | number): string {
+  if (pos === "before_system" || pos === "after_system" || pos === "before_user") return pos;
+  if (pos === 0) return "before_system";
+  if (pos === 1) return "after_system";
+  return "after_system";
+}
+
+/**
+ * Parse SillyTavern character_book → create WorldBook + Entries → associate to character.
+ * Returns the created WorldBook ID, or null if no character_book.
+ */
+async function importCharacterBook(
+  characterBook: STCharacterBook | undefined,
+  characterId: string,
+  characterName: string,
+  userId: string,
+): Promise<string | null> {
+  if (!characterBook) return null;
+
+  const rawEntries = characterBook.entries;
+  if (!rawEntries) return null;
+
+  // Normalize entries: ST uses object with numeric keys or array
+  const entryList: STCharacterBookEntry[] = Array.isArray(rawEntries)
+    ? rawEntries
+    : Object.values(rawEntries);
+
+  if (entryList.length === 0) return null;
+
+  // Map entries to our format
+  const entries = entryList.map((e) => ({
+    keywords: e.keys ?? e.key ?? [],
+    secondaryKeywords: e.secondary_keys ?? [],
+    content: e.content ?? "",
+    position: mapEntryPosition(e.position),
+    priority: e.insertion_order ?? e.order ?? e.priority ?? 0,
+    enabled: e.enabled ?? (e.disable !== true),
+  }));
+
+  // Create WorldBook as global scope (imported with character card)
+  const wb = await createWorldbook(
+    {
+      name: characterBook.name || `${characterName} - 世界书`,
+      description: characterBook.description ?? `从角色卡「${characterName}」导入的世界书`,
+      scope: "global",
+      entries: entries as Array<Record<string, unknown>>,
+    },
+    userId,
+    "admin", // character import is admin-only, so use admin role
+  );
+
+  // Associate WorldBook to CharacterCard via CharacterWorldBook
+  await prisma.characterWorldBook.create({
+    data: { characterId, worldBookId: wb.id },
+  });
+
+  return wb.id;
+}
+
 export async function importFromPng(buffer: Buffer, userId: string) {
   // Parse PNG chunks to find tEXt chunk with keyword "chara"
   let charaData: string | null = null;
@@ -106,10 +194,15 @@ export async function importFromPng(buffer: Buffer, userId: string) {
   const avatarPath = await saveBufferAsFile(buffer, "avatars");
   const coverPath = await saveBufferAsFile(buffer, "covers");
 
-  return createCharacter(
+  const character = await createCharacter(
     { ...mapped, avatar: avatarPath, coverImage: coverPath, source: "sillytavern_png" },
     userId,
   );
+
+  // Import character_book if present
+  await importCharacterBook(stCard.data.character_book, character.id as string, mapped.name, userId);
+
+  return character;
 }
 
 export async function importFromJson(jsonStr: string, userId: string) {
@@ -119,7 +212,12 @@ export async function importFromJson(jsonStr: string, userId: string) {
   if (json.spec === "chara_card_v2" || json.data?.name) {
     const stCard: STCharacterCardV2 = json.spec ? json : { data: json };
     const mapped = mapSTCard(stCard);
-    return createCharacter({ ...mapped, source: "json_import" }, userId);
+    const character = await createCharacter({ ...mapped, source: "json_import" }, userId);
+
+    // Import character_book if present
+    await importCharacterBook(stCard.data.character_book, character.id as string, mapped.name, userId);
+
+    return character;
   }
 
   // Internal format: use fields directly

@@ -212,7 +212,7 @@ async function main() {
     await prisma.chatSession.upsert({
       where: { id: s.id },
       update: {},
-      create: { ...sessionData, userId: user.id, maxTokens: 8192 },
+      create: { ...sessionData, userId: user.id, maxTokens: 16384 },
     });
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];

@@ -15,9 +15,6 @@ static inline __m256 exp_approx_avx2(__m256 x) {
     // exp(x) = 2^(x * log2(e))
     // x * log2(e)
     const __m256 log2e = _mm256_set1_ps(1.44269504089f);
-    const __m256 c0 = _mm256_set1_ps(0.5f);
-    const __m256 one = _mm256_set1_ps(1.0f);
-
     __m256 t = _mm256_mul_ps(x, log2e);
 
     // Round to nearest integer

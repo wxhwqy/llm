@@ -18,6 +18,9 @@ interface SessionWithCharacter {
   modelId: string;
   usedTokens: number;
   maxTokens: number;
+  temperature: number | null;
+  topP: number | null;
+  topK: number | null;
   contextSummary: string | null;
   character: {
     preset: string;
@@ -26,6 +29,15 @@ interface SessionWithCharacter {
     scenario: string;
     exampleDialogue: string;
   };
+}
+
+/** Extract non-null sampling params from session */
+function getSessionSampling(session: SessionWithCharacter) {
+  const s: Record<string, number> = {};
+  if (session.temperature !== null) s.temperature = session.temperature;
+  if (session.topP !== null) s.topP = session.topP;
+  if (session.topK !== null) s.topK = session.topK;
+  return Object.keys(s).length ? s : undefined;
 }
 
 async function buildFinalMessages(
@@ -182,7 +194,7 @@ export async function sendMessageStream(
       const historyTokens = allUncompressed.reduce((sum, m) => sum + m.tokenCount, 0);
       checkAndTriggerCompression(sessionWithChar, historyTokens, systemTokens, provider ?? undefined);
     },
-  }, { abortSignal, sessionId, provider: provider ?? undefined });
+  }, { abortSignal, sessionId, provider: provider ?? undefined, sampling: getSessionSampling(sessionWithChar) });
 }
 
 // ─── Regenerate ──────────────────────────────────────────
@@ -257,5 +269,5 @@ export async function regenerateStream(
         historyTokens, systemTokens, provider ?? undefined,
       );
     },
-  }, { abortSignal, sessionId, provider: provider ?? undefined });
+  }, { abortSignal, sessionId, provider: provider ?? undefined, sampling: getSessionSampling(sessionWithChar as unknown as SessionWithCharacter) });
 }

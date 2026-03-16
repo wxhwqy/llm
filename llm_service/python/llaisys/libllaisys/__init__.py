@@ -15,6 +15,11 @@ from .ops import load_ops
 from .models import (
     load_models,
     LlaisysQwen3Meta, LlaisysQwen3Weights, LlaisysQwen3FP8Linear, LlaisysQwen3Model_p,
+    LlaisysQwen3_5Meta, LlaisysQwen3_5Weights, LlaisysQwen3_5DeltaNetWeights,
+    LlaisysQwen3_5GatedAttnWeights, LlaisysQwen3_5Model_p,
+    LlaisysQwen3_5MoeMeta, LlaisysQwen3_5MoeWeights, LlaisysQwen3_5MoeModel_p,
+    LlaisysGPTQWeight, LlaisysMoeExpert, LlaisysMoeSharedExpert, LlaisysMoeBlock,
+    LlaisysQwen3_5MoeDeltaNetWeights, LlaisysQwen3_5MoeGatedAttnWeights,
 )
 
 
@@ -81,4 +86,18 @@ __all__ = [
     "LlaisysQwen3Weights",
     "LlaisysQwen3FP8Linear",
     "LlaisysQwen3Model_p",
+    "LlaisysQwen3_5Meta",
+    "LlaisysQwen3_5Weights",
+    "LlaisysQwen3_5DeltaNetWeights",
+    "LlaisysQwen3_5GatedAttnWeights",
+    "LlaisysQwen3_5Model_p",
+    "LlaisysQwen3_5MoeMeta",
+    "LlaisysQwen3_5MoeWeights",
+    "LlaisysQwen3_5MoeModel_p",
+    "LlaisysGPTQWeight",
+    "LlaisysMoeExpert",
+    "LlaisysMoeSharedExpert",
+    "LlaisysMoeBlock",
+    "LlaisysQwen3_5MoeDeltaNetWeights",
+    "LlaisysQwen3_5MoeGatedAttnWeights",
 ]

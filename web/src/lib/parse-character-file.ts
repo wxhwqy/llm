@@ -1,5 +1,24 @@
 import type { ImportedCharacterData } from "@/stores/import-store";
 
+interface STCharacterBookEntry {
+  keys?: string[];
+  key?: string[];
+  secondary_keys?: string[];
+  content?: string;
+  enabled?: boolean;
+  disable?: boolean;
+  insertion_order?: number;
+  order?: number;
+  priority?: number;
+  position?: string | number;
+}
+
+interface STCharacterBook {
+  name?: string;
+  description?: string;
+  entries: Record<string, STCharacterBookEntry> | STCharacterBookEntry[];
+}
+
 interface STCharacterCardV2 {
   spec?: string;
   data: {
@@ -13,6 +32,38 @@ interface STCharacterCardV2 {
     alternate_greetings?: string[];
     creator_notes?: string;
     tags?: string[];
+    character_book?: STCharacterBook;
+  };
+}
+
+function mapEntryPosition(pos?: string | number): string {
+  if (pos === "before_system" || pos === "after_system" || pos === "before_user") return pos;
+  if (pos === 0) return "before_system";
+  if (pos === 1) return "after_system";
+  return "after_system";
+}
+
+function extractCharacterBookInfo(
+  book: STCharacterBook | undefined,
+): ImportedCharacterData["characterBook"] {
+  if (!book?.entries) return null;
+  const entryList = Array.isArray(book.entries)
+    ? book.entries
+    : Object.values(book.entries);
+  if (entryList.length === 0) return null;
+
+  return {
+    name: book.name || null,
+    description: book.description || null,
+    entryCount: entryList.length,
+    entries: entryList.map((e) => ({
+      keywords: e.keys ?? e.key ?? [],
+      secondaryKeywords: e.secondary_keys ?? [],
+      content: e.content ?? "",
+      position: mapEntryPosition(e.position) as "before_system" | "after_system" | "before_user",
+      priority: e.insertion_order ?? e.order ?? e.priority ?? 0,
+      enabled: e.enabled ?? (e.disable !== true),
+    })),
   };
 }
 
@@ -33,6 +84,7 @@ function mapSTCard(
     tags: d.tags ?? [],
     source,
     imageDataUrl: null,
+    characterBook: extractCharacterBookInfo(d.character_book),
   };
 }
 
@@ -121,5 +173,6 @@ export async function parseCharacterJson(
     tags: json.tags ?? [],
     source: "json_import",
     imageDataUrl: null,
+    characterBook: null,
   };
 }

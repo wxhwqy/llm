@@ -12,6 +12,7 @@ import {
   Users,
   Globe,
   User,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,15 +25,40 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useWorldBooks } from "@/hooks/use-queries";
+import { useWorldBooks, useDeleteWorldBook } from "@/hooks/use-queries";
+import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { timeAgo } from "@/lib/constants";
 import type { WorldBookSummary } from "@/types/worldbook";
 
 type ScopeFilter = "all" | "global" | "personal";
 
 function WorldBookCard({ book }: { book: WorldBookSummary }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const deleteMutation = useDeleteWorldBook();
   const isGlobal = book.scope === "global";
+
+  const handleExport = async () => {
+    try {
+      const res = await fetch(`/api/worldbooks/${book.id}/export`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${book.name}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Export failed:", e);
+    }
+  };
+
+  const handleDelete = () => {
+    deleteMutation.mutate(book.id, {
+      onSuccess: () => setDeleteOpen(false),
+    });
+  };
 
   return (
     <>
@@ -78,7 +104,7 @@ function WorldBookCard({ book }: { book: WorldBookSummary }) {
                 </Badge>
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">
-                创建于 {book.createdAt}
+                {timeAgo(book.createdAt)}
               </p>
             </div>
           </div>
@@ -110,7 +136,12 @@ function WorldBookCard({ book }: { book: WorldBookSummary }) {
               编辑
             </Button>
           </Link>
-          <Button variant="outline" size="icon" className="h-8 w-8 shrink-0">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={handleExport}
+          >
             <Download className="h-3.5 w-3.5" />
           </Button>
           <Button
@@ -138,7 +169,14 @@ function WorldBookCard({ book }: { book: WorldBookSummary }) {
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
               取消
             </Button>
-            <Button variant="destructive" onClick={() => setDeleteOpen(false)}>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending && (
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+              )}
               删除
             </Button>
           </DialogFooter>
@@ -197,14 +235,18 @@ export default function WorldBooksPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <Upload className="h-4 w-4 mr-1.5" />
-              导入
-            </Button>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-1.5" />
-              新建
-            </Button>
+            <Link href="/worldbooks/import">
+              <Button variant="outline" size="sm">
+                <Upload className="h-4 w-4 mr-1.5" />
+                导入
+              </Button>
+            </Link>
+            <Link href="/worldbooks/new">
+              <Button size="sm">
+                <Plus className="h-4 w-4 mr-1.5" />
+                新建
+              </Button>
+            </Link>
           </div>
         </div>
 

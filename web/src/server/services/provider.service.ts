@@ -2,6 +2,11 @@ import * as providerRepo from "../repositories/provider.repository";
 import { NotFoundError } from "../lib/errors";
 import type { CreateProviderInput, UpdateProviderInput, ModelItem } from "../validators/provider";
 
+/** Strip trailing slash and /v1 suffix so we can append /v1/... uniformly */
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "").replace(/\/v1$/, "");
+}
+
 // ─── Types ────────────────────────────────────────────────
 
 export interface ProviderWithModels {
@@ -94,7 +99,7 @@ async function discoverModels(
     const headers: Record<string, string> = {};
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
-    const res = await fetch(`${baseUrl}/v1/models`, {
+    const res = await fetch(`${normalizeBaseUrl(baseUrl)}/v1/models`, {
       headers,
       signal: AbortSignal.timeout(5000),
     });
@@ -187,7 +192,7 @@ export async function testProvider(
     const headers: Record<string, string> = {};
     if (provider.apiKey) headers["Authorization"] = `Bearer ${provider.apiKey}`;
 
-    const res = await fetch(`${provider.baseUrl}/v1/models`, {
+    const res = await fetch(`${normalizeBaseUrl(provider.baseUrl)}/v1/models`, {
       headers,
       signal: AbortSignal.timeout(10000),
     });

@@ -1,7 +1,5 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api";
 
-export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK !== "false";
-
 export const DEFAULT_MODEL_ID = "qwen3-32b";
 
 export const DEFAULT_PAGE_SIZE = 20;

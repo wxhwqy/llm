@@ -230,6 +230,9 @@ class Qwen3:
     def set_profile(self, enabled: bool):
         LIB_LLAISYS.llaisysQwen3ModelSetProfile(self._model, 1 if enabled else 0)
 
+    def set_repetition_penalty(self, penalty: float):
+        LIB_LLAISYS.llaisysQwen3ModelSetRepetitionPenalty(self._model, penalty)
+
     def _infer_one(self, input_array, n, temperature, top_k, top_p, seed):
         """Call the appropriate C infer function based on sampling params."""
         use_sampling = (temperature > 0.0) and (top_k != 1)
@@ -250,12 +253,13 @@ class Qwen3:
         top_p: float = 0.8,
         temperature: float = 0.8,
         reuse_cache: bool = False,
+        repetition_penalty: float = 1.2,
     ):
         """Non-streaming generate: returns full token list."""
         return list(self.stream_generate(
             inputs, max_new_tokens=max_new_tokens,
             top_k=top_k, top_p=top_p, temperature=temperature,
-            reuse_cache=reuse_cache,
+            reuse_cache=reuse_cache, repetition_penalty=repetition_penalty,
         ))
 
     def stream_generate(
@@ -266,6 +270,7 @@ class Qwen3:
         top_p: float = 0.8,
         temperature: float = 0.8,
         reuse_cache: bool = False,
+        repetition_penalty: float = 1.2,
     ):
         """Streaming generate: yields one token id at a time.
 
@@ -277,6 +282,7 @@ class Qwen3:
                 Defaults to False for backward compatibility.
         """
         import random
+        self.set_repetition_penalty(repetition_penalty)
         tokens = list(inputs)
 
         prefix_len = 0

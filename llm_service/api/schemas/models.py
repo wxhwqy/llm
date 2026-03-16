@@ -11,7 +11,7 @@ class ModelInfo(BaseModel):
     created: int = 0
     owned_by: str = "llaisys"
     name: str = ""
-    max_context_length: int = 8192
+    max_context_length: int = 16384
     status: str = "available"
 
 

@@ -13,6 +13,11 @@ import {
   User,
   Zap,
   BookOpen,
+  Settings2,
+  Trash2,
+  Loader2,
+  SlidersHorizontal,
+  RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,10 +44,16 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Slider } from "@/components/ui/slider";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getAvatarColor, timeAgo, USE_MOCK } from "@/lib/constants";
+import { getAvatarColor, timeAgo } from "@/lib/constants";
 import { useChatStore } from "@/stores/chat-store";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import {
@@ -50,12 +61,13 @@ import {
   useMessages,
   useModels,
   useWorldBooks,
+  useDeleteSessions,
 } from "@/hooks/use-queries";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useUiStore } from "@/stores/ui-store";
 import { useAuthGuard } from "@/hooks/use-require-auth";
 import { api } from "@/lib/api-client";
-import { mockApi } from "@/lib/mock-api";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, SamplingParams } from "@/types/chat";
 import type { ChatSession } from "@/types/chat";
 
 /* ------------------------------------------------------------------ */
@@ -115,49 +127,158 @@ function SessionList({
   currentId: string;
   onSelect?: () => void;
 }) {
+  const router = useRouter();
+  const [managing, setManaging] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const deleteMutation = useDeleteSessions();
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleConfirm = async () => {
+    if (selected.size === 0) {
+      setManaging(false);
+      return;
+    }
+    await deleteMutation.mutateAsync([...selected]);
+    const deletedCurrent = selected.has(currentId);
+    setSelected(new Set());
+    setManaging(false);
+    if (deletedCurrent) {
+      router.replace("/chat");
+    }
+  };
+
+  const handleCancel = () => {
+    setSelected(new Set());
+    setManaging(false);
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-3 border-b">
         <h2 className="font-semibold text-sm">会话列表</h2>
-        <Link href="/characters">
-          <Button variant="ghost" size="icon" className="h-7 w-7">
-            <Plus className="h-4 w-4" />
-          </Button>
-        </Link>
+        <div className="flex items-center gap-1">
+          {managing ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={handleCancel}
+                disabled={deleteMutation.isPending}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleConfirm}
+                disabled={selected.size === 0 || deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                ) : (
+                  <Trash2 className="h-3 w-3 mr-1" />
+                )}
+                删除{selected.size > 0 ? ` (${selected.size})` : ""}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setManaging(true)}
+                title="管理"
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
+              <Link href="/characters">
+                <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </Link>
+            </>
+          )}
+        </div>
       </div>
-      <ScrollArea className="flex-1 overscroll-none">
+      <ScrollArea className="flex-1 min-h-0 overscroll-none">
         <div className="p-2 space-y-1">
-          {sessions.map((s) => (
-            <Link
-              key={s.id}
-              href={`/chat/${s.id}`}
-              onClick={onSelect}
-              className={cn(
-                "flex items-start gap-3 rounded-lg p-2.5 transition-colors text-left w-full",
-                s.id === currentId ? "bg-accent" : "hover:bg-accent/50",
-              )}
-            >
-              <CharacterAvatar
-                characterId={s.characterId}
-                characterName={s.characterName}
-                coverImage={s.characterCoverImage}
-                size="md"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium truncate">
-                    {s.characterName}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
-                    {timeAgo(s.updatedAt)}
-                  </span>
+          {sessions.map((s) => {
+            const isSelected = selected.has(s.id);
+            const content = (
+              <div
+                className={cn(
+                  "flex items-start gap-3 rounded-lg p-2.5 transition-colors text-left w-full",
+                  managing
+                    ? isSelected
+                      ? "bg-destructive/10"
+                      : "hover:bg-accent/50"
+                    : s.id === currentId
+                      ? "bg-accent"
+                      : "hover:bg-accent/50",
+                )}
+              >
+                {managing && (
+                  <Checkbox
+                    checked={isSelected}
+                    className="mt-1 shrink-0"
+                    onCheckedChange={() => toggleSelect(s.id)}
+                  />
+                )}
+                <CharacterAvatar
+                  characterId={s.characterId}
+                  characterName={s.characterName}
+                  coverImage={s.characterCoverImage}
+                  size="md"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium truncate">
+                      {s.characterName}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
+                      {timeAgo(s.updatedAt)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {s.lastMessage}
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
-                  {s.lastMessage}
-                </p>
               </div>
-            </Link>
-          ))}
+            );
+
+            if (managing) {
+              return (
+                <div
+                  key={s.id}
+                  className="cursor-pointer"
+                  onClick={() => toggleSelect(s.id)}
+                >
+                  {content}
+                </div>
+              );
+            }
+
+            return (
+              <Link
+                key={s.id}
+                href={`/chat/${s.id}`}
+                onClick={onSelect}
+              >
+                {content}
+              </Link>
+            );
+          })}
         </div>
       </ScrollArea>
     </div>
@@ -356,6 +477,11 @@ export default function ChatSessionPage({
     usedTokens: 0,
     maxTokens: 0,
   });
+  const [sampling, setSampling] = useState<SamplingParams>({
+    temperature: null,
+    topP: null,
+    topK: null,
+  });
 
   /* ---- chat stream ---- */
   const { sendMessage, stopGeneration, regenerate } =
@@ -385,6 +511,9 @@ export default function ChatSessionPage({
     setModel(session.modelId);
     setEnabledWorldbooks(session.personalWorldBookIds);
     setContextUsage(session.contextUsage);
+    if (session.samplingParams) {
+      setSampling(session.samplingParams);
+    }
   }, [session]);
 
   /* auto-scroll on new content */
@@ -395,12 +524,14 @@ export default function ChatSessionPage({
   /* ---- handlers ---- */
 
   const updateSession = useCallback(
-    async (patch: { modelId?: string; personalWorldBookIds?: string[] }) => {
-      if (USE_MOCK) {
-        await mockApi.updateSession(sessionId, patch);
-      } else {
-        await api.put(`/chat/sessions/${sessionId}`, patch);
-      }
+    async (patch: {
+      modelId?: string;
+      personalWorldBookIds?: string[];
+      temperature?: number | null;
+      topP?: number | null;
+      topK?: number | null;
+    }) => {
+      await api.put(`/chat/sessions/${sessionId}`, patch);
     },
     [sessionId],
   );
@@ -441,8 +572,17 @@ export default function ChatSessionPage({
     regenerate(sessionId);
   };
 
-  const handleEdit = (id: string, content: string) => {
+  const handleEdit = async (id: string, content: string) => {
+    // Optimistically update local store
     useChatStore.getState().editMessage(id, content);
+    try {
+      // Persist to backend
+      await api.put(`/chat/sessions/${sessionId}/messages/${id}`, { content });
+    } catch {
+      // Revert on failure — reload from server
+      const fresh = await api.get(`/chat/sessions/${sessionId}/messages`);
+      useChatStore.getState().setMessages(fresh.data);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -452,9 +592,13 @@ export default function ChatSessionPage({
     }
   };
 
+  /* Resolve actual context limit: prefer the model's maxContextLength over the
+     hardcoded session maxTokens (which defaults to 8192) */
+  const currentModel = modelList.find((m) => m.id === model);
+  const effectiveMaxTokens = currentModel?.maxContextLength ?? contextUsage.maxTokens;
   const usagePercent =
-    contextUsage.maxTokens > 0
-      ? (contextUsage.usedTokens / contextUsage.maxTokens) * 100
+    effectiveMaxTokens > 0
+      ? (contextUsage.usedTokens / effectiveMaxTokens) * 100
       : 0;
 
   const characterName = session?.characterName ?? "";
@@ -511,6 +655,113 @@ export default function ChatSessionPage({
 
           {!characterName && <div className="flex-1" />}
 
+          {/* Sampling params */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className={cn(
+                  "h-8 w-8 hidden sm:flex shrink-0",
+                  (sampling.temperature !== null || sampling.topP !== null || sampling.topK !== null)
+                    && "border-violet-500/50 text-violet-600",
+                )}
+                title="采样参数"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72" align="end">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold">采样参数</h4>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs text-muted-foreground"
+                    onClick={() => {
+                      const reset: SamplingParams = { temperature: null, topP: null, topK: null };
+                      setSampling(reset);
+                      updateSession({ temperature: null, topP: null, topK: null });
+                    }}
+                  >
+                    <RotateCw className="h-3 w-3 mr-1" />
+                    重置
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground -mt-2">
+                  留空使用模型默认值
+                </p>
+
+                {/* Temperature */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium">Temperature</label>
+                    <span className="text-xs text-muted-foreground tabular-nums text-right">
+                      {(sampling.temperature ?? 0.6).toFixed(1)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[sampling.temperature ?? 0.6]}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    onValueChange={([v]) => setSampling((s) => ({ ...s, temperature: v }))}
+                    onValueCommit={([v]) => updateSession({ temperature: v })}
+                  />
+                  <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                    <span>精确</span>
+                    <span>创意</span>
+                  </div>
+                </div>
+
+                {/* Top-P */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium">Top-P</label>
+                    <span className="text-xs text-muted-foreground tabular-nums text-right">
+                      {(sampling.topP ?? 0.95).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[sampling.topP ?? 0.95]}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onValueChange={([v]) => setSampling((s) => ({ ...s, topP: v }))}
+                    onValueCommit={([v]) => updateSession({ topP: v })}
+                  />
+                  <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                    <span>集中</span>
+                    <span>多样</span>
+                  </div>
+                </div>
+
+                {/* Top-K */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium">Top-K</label>
+                    <span className="text-xs text-muted-foreground tabular-nums text-right">
+                      {sampling.topK ?? 20}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[sampling.topK ?? 20]}
+                    min={0}
+                    max={100}
+                    step={1}
+                    onValueChange={([v]) => setSampling((s) => ({ ...s, topK: v }))}
+                    onValueCommit={([v]) => updateSession({ topK: v })}
+                  />
+                  <div className="flex justify-between text-[10px] text-muted-foreground/60">
+                    <span>贪婪</span>
+                    <span>宽泛</span>
+                  </div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           {/* Model selector */}
           <Select value={model} onValueChange={handleModelChange}>
             <SelectTrigger className="w-[140px] h-8 text-xs hidden sm:flex">
@@ -518,11 +769,23 @@ export default function ChatSessionPage({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {modelList.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.name}
-                </SelectItem>
-              ))}
+              {modelList
+                .filter((m) => m.status !== "offline")
+                .map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full shrink-0",
+                          m.status === "online"
+                            ? "bg-green-500"
+                            : "bg-amber-500",
+                        )}
+                      />
+                      {m.name}
+                    </div>
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
 
@@ -549,7 +812,7 @@ export default function ChatSessionPage({
           <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground">
             <span>
               {contextUsage.usedTokens.toLocaleString()}/
-              {contextUsage.maxTokens.toLocaleString()}
+              {effectiveMaxTokens.toLocaleString()}
             </span>
             <Progress value={usagePercent} className="w-20 h-1.5" />
           </div>
@@ -666,7 +929,7 @@ export default function ChatSessionPage({
             <span>
               上下文:{" "}
               {contextUsage.usedTokens.toLocaleString()}/
-              {contextUsage.maxTokens.toLocaleString()}
+              {effectiveMaxTokens.toLocaleString()}
             </span>
             <Progress value={usagePercent} className="flex-1 h-1.5" />
           </div>

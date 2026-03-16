@@ -11,7 +11,9 @@
 namespace llaisys::ops {
 
 void sample(tensor_t output_idx, tensor_t logits, tensor_t workspace,
-            float temperature, int top_k, float top_p, uint64_t seed) {
+            float temperature, int top_k, float top_p, uint64_t seed,
+            const int64_t *penalty_tokens, size_t n_penalty_tokens,
+            float repetition_penalty) {
     ASSERT(output_idx->dtype() == LLAISYS_DTYPE_I64, "output_idx must be int64");
     ASSERT(workspace->dtype() == LLAISYS_DTYPE_F32, "workspace must be float32");
     ASSERT(logits->isContiguous(), "logits must be contiguous");
@@ -27,7 +29,8 @@ void sample(tensor_t output_idx, tensor_t logits, tensor_t workspace,
     if (logits->deviceType() == LLAISYS_DEVICE_CPU) {
         return cpu::sample(output_idx->data(), logits->data(), workspace->data(),
                            logits->dtype(), vocab_size,
-                           temperature, top_k, top_p, seed);
+                           temperature, top_k, top_p, seed,
+                           penalty_tokens, n_penalty_tokens, repetition_penalty);
     }
 
 #ifdef ENABLE_NVIDIA_API
@@ -35,7 +38,8 @@ void sample(tensor_t output_idx, tensor_t logits, tensor_t workspace,
         llaisys::core::context().setDevice(logits->deviceType(), logits->deviceId());
         return nvidia::sample(output_idx->data(), logits->data(), workspace->data(),
                               logits->dtype(), vocab_size,
-                              temperature, top_k, top_p, seed);
+                              temperature, top_k, top_p, seed,
+                              penalty_tokens, n_penalty_tokens, repetition_penalty);
     }
 #endif
 

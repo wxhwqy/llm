@@ -12,6 +12,9 @@ function formatSessionSummary(s: {
   title: string;
   usedTokens: number;
   maxTokens: number;
+  temperature: number | null;
+  topP: number | null;
+  topK: number | null;
   createdAt: Date;
   updatedAt: Date;
   character: { name: string; avatar: string | null; coverImage: string | null };
@@ -29,6 +32,11 @@ function formatSessionSummary(s: {
     lastMessage: s.messages[0]?.content.slice(0, 100) ?? "",
     personalWorldBookIds: s.personalBooks.map((b) => b.worldBookId),
     contextUsage: { usedTokens: s.usedTokens, maxTokens: s.maxTokens },
+    samplingParams: {
+      temperature: s.temperature,
+      topP: s.topP,
+      topK: s.topK,
+    },
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
   };
@@ -58,7 +66,7 @@ export function formatMessage(m: {
 
 export async function listSessions(userId: string, page: number, pageSize: number) {
   const { items, total } = await sessionRepo.listSessionsPaginated(userId, page, pageSize);
-  const data = items.map((s) => formatSessionSummary(s as Parameters<typeof formatSessionSummary>[0]));
+  const data = items.map((s) => formatSessionSummary(s as unknown as Parameters<typeof formatSessionSummary>[0]));
   return { data, pagination: { page, pageSize, total } };
 }
 
@@ -75,7 +83,7 @@ export async function createSession(userId: string, characterId: string, modelId
     characterId,
     modelId: modelId || config.defaultModelId,
     title: "新会话",
-    maxTokens: 8192,
+    maxTokens: 16384,
   });
 
   const messages = [];
@@ -100,6 +108,7 @@ export async function createSession(userId: string, characterId: string, modelId
     lastMessage: character.firstMessage?.slice(0, 100) ?? "",
     personalWorldBookIds: [] as string[],
     contextUsage: { usedTokens: session.usedTokens, maxTokens: session.maxTokens },
+    samplingParams: { temperature: null, topP: null, topK: null },
     messages,
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString(),
@@ -109,7 +118,7 @@ export async function createSession(userId: string, characterId: string, modelId
 export async function updateSession(
   sessionId: string,
   userId: string,
-  data: { modelId?: string; personalWorldBookIds?: string[]; title?: string },
+  data: { modelId?: string; personalWorldBookIds?: string[]; title?: string; temperature?: number; topP?: number; topK?: number },
 ) {
   await sessionRepo.findOwnedSession(sessionId, userId);
 
@@ -122,6 +131,9 @@ export async function updateSession(
     {
       ...(data.modelId !== undefined ? { modelId: data.modelId } : {}),
       ...(data.title !== undefined ? { title: data.title } : {}),
+      ...(data.temperature !== undefined ? { temperature: data.temperature } : {}),
+      ...(data.topP !== undefined ? { topP: data.topP } : {}),
+      ...(data.topK !== undefined ? { topK: data.topK } : {}),
     },
     {
       character: { select: { name: true, avatar: true, coverImage: true } },
@@ -130,7 +142,9 @@ export async function updateSession(
     },
   ) as unknown as {
     id: string; characterId: string; modelId: string; title: string;
-    usedTokens: number; maxTokens: number; createdAt: Date; updatedAt: Date;
+    usedTokens: number; maxTokens: number;
+    temperature: number | null; topP: number | null; topK: number | null;
+    createdAt: Date; updatedAt: Date;
     character: { name: string; avatar: string | null; coverImage: string | null };
     messages: { content: string }[];
     personalBooks: { worldBookId: string }[];
@@ -147,6 +161,11 @@ export async function updateSession(
     lastMessage: updated.messages[0]?.content.slice(0, 100) ?? "",
     personalWorldBookIds: updated.personalBooks.map((b) => b.worldBookId),
     contextUsage: { usedTokens: updated.usedTokens, maxTokens: updated.maxTokens },
+    samplingParams: {
+      temperature: updated.temperature,
+      topP: updated.topP,
+      topK: updated.topK,
+    },
     createdAt: updated.createdAt.toISOString(),
     updatedAt: updated.updatedAt.toISOString(),
   };

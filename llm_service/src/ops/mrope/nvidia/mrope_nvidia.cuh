@@ -1,0 +1,10 @@
+#pragma once
+#include "llaisys.h"
+#include <cstddef>
+
+namespace llaisys::ops::nvidia {
+void mrope(std::byte *out, const std::byte *in, const std::byte *pos_ids,
+           float theta, const int *sections, size_t rotary_dim,
+           llaisysDataType_t dtype,
+           size_t seq_len, size_t n_head, size_t head_dim);
+}

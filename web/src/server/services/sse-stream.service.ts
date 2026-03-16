@@ -1,4 +1,4 @@
-import { streamChatCompletion } from "./llm-client.service";
+import { streamChatCompletion, type SamplingParams } from "./llm-client.service";
 
 // ─── Types ────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ export function createLLMStream(
   messages: { role: string; content: string }[],
   modelId: string,
   callbacks: StreamCallbacks,
-  opts?: { abortSignal?: AbortSignal; sessionId?: string; provider?: { baseUrl: string; apiKey: string } },
+  opts?: { abortSignal?: AbortSignal; sessionId?: string; provider?: { baseUrl: string; apiKey: string }; sampling?: SamplingParams },
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
@@ -54,6 +54,7 @@ export function createLLMStream(
 
       let fullContent = "";
       let usage: LLMUsage | null = null;
+      let contentStarted = false; // 跳过开头空白字符
 
       try {
         const llmResponse = await streamChatCompletion(
@@ -62,6 +63,7 @@ export function createLLMStream(
           opts?.abortSignal,
           opts?.sessionId,
           opts?.provider,
+          opts?.sampling,
         );
         const reader = llmResponse.body!.getReader();
         const decoder = new TextDecoder();
@@ -89,6 +91,17 @@ export function createLLMStream(
               const delta = chunk.choices?.[0]?.delta?.content;
               if (delta) fullContent += delta;
               if (chunk.usage) usage = chunk.usage;
+
+              // 跳过开头的空白字符 chunk，避免流式输出前面出现空行
+              if (delta && !contentStarted) {
+                const trimmed = delta.trimStart();
+                if (!trimmed) continue; // 整个 chunk 都是空白，跳过
+                contentStarted = true;
+                // 重写 chunk，把 trimmed 后的 delta 发送给客户端
+                chunk.choices[0].delta.content = trimmed;
+                send(JSON.stringify(chunk));
+                continue;
+              }
               send(data);
             } catch {
               // skip malformed chunks

@@ -9,6 +9,9 @@ export const updateSessionSchema = z.object({
   modelId: z.string().optional(),
   personalWorldBookIds: z.array(z.string()).optional(),
   title: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
+  topK: z.number().int().min(0).optional(),
 });
 
 export const sendMessageSchema = z.object({

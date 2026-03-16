@@ -283,4 +283,14 @@ __export void llaisysQwen3ModelSetProfile(struct LlaisysQwen3Model *model, int e
     }
 }
 
+__export void llaisysQwen3ModelSetRepetitionPenalty(struct LlaisysQwen3Model *model, float penalty) {
+    if (model->is_tp) {
+#ifdef ENABLE_NVIDIA_API
+        model->tp_model->setRepetitionPenalty(penalty);
+#endif
+    } else {
+        model->model->setRepetitionPenalty(penalty);
+    }
+}
+
 }

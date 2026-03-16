@@ -71,6 +71,11 @@ private:
     std::vector<Qwen3TPDeviceState> devs_;
     size_t cache_len_;
 
+    // Repetition penalty
+    float repetition_penalty_ = 1.0f;
+    std::vector<int64_t> token_history_;
+    void applyRepetitionPenalty(tensor_t logits, size_t vocab_size);
+
     // TP-derived dimensions
     size_t nh_per_tp_;      // num_heads / tp
     size_t nkvh_per_tp_;    // num_kv_heads / tp
@@ -97,6 +102,7 @@ public:
     void resetCache();
     void setCacheLen(size_t len);
     size_t cacheLen() const { return cache_len_; }
+    void setRepetitionPenalty(float penalty) { repetition_penalty_ = penalty; }
 
     int64_t infer(const int64_t *token_ids, size_t num_tokens,
                   float temperature = 0.0f, int top_k = 0, float top_p = 1.0f,

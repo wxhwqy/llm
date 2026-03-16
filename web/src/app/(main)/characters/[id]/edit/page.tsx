@@ -11,6 +11,7 @@ import {
   X,
   Image as ImageIcon,
   Loader2,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,8 +40,10 @@ import {
   useCreateCharacter,
   useUpdateCharacter,
   useDeleteCharacter,
+  useCreateWorldBook,
 } from "@/hooks/use-queries";
 import { useImportStore } from "@/stores/import-store";
+import type { CharacterBookInfo } from "@/stores/import-store";
 import { getCoverGradient } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { CharacterCard } from "@/types/character";
@@ -99,7 +102,8 @@ export default function CharacterEditPage({
   const createCharacter = useCreateCharacter();
   const updateCharacter = useUpdateCharacter();
   const deleteCharacter = useDeleteCharacter();
-  const isSaving = createCharacter.isPending || updateCharacter.isPending;
+  const createWorldBook = useCreateWorldBook();
+  const isSaving = createCharacter.isPending || updateCharacter.isPending || createWorldBook.isPending;
 
   const character = characterData?.data;
   const allWorldBooks = worldBooksData?.data ?? [];
@@ -119,6 +123,7 @@ export default function CharacterEditPage({
   const [worldBookIds, setWorldBookIds] = useState<string[]>([]);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pendingCharacterBook, setPendingCharacterBook] = useState<CharacterBookInfo | null>(null);
 
   useEffect(() => {
     if (character) {
@@ -153,6 +158,7 @@ export default function CharacterEditPage({
       setSource(importData.source);
       setTags(importData.tags);
       setCoverPreview(importData.imageDataUrl);
+      setPendingCharacterBook(importData.characterBook);
       clearImport();
     }
   }, [isNew, importData, clearImport]);
@@ -197,8 +203,27 @@ export default function CharacterEditPage({
     worldBookIds.includes(wb.id)
   );
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (isSaving || !name.trim()) return;
+
+    let finalWorldBookIds = [...worldBookIds];
+
+    // If there's a pending character book from import, create the world book first
+    if (pendingCharacterBook && isNew) {
+      try {
+        const wbRes = await createWorldBook.mutateAsync({
+          name: pendingCharacterBook.name || `${name.trim()} - 世界书`,
+          description: pendingCharacterBook.description || `从角色卡「${name.trim()}」导入的世界书`,
+          scope: "global",
+          entries: pendingCharacterBook.entries,
+        });
+        finalWorldBookIds.push(wbRes.data.id);
+        setPendingCharacterBook(null);
+      } catch {
+        // World book creation failed, but still proceed with character creation
+      }
+    }
+
     const payload = {
       name: name.trim(),
       description,
@@ -211,7 +236,7 @@ export default function CharacterEditPage({
       creatorNotes,
       source,
       tags,
-      worldBookIds,
+      worldBookIds: finalWorldBookIds,
       coverImageDataUrl: coverPreview,
     };
     if (isNew) {
@@ -274,6 +299,29 @@ export default function CharacterEditPage({
         </div>
 
         <div className="space-y-8">
+          {pendingCharacterBook && (
+            <div className="flex items-start gap-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+              <BookOpen className="h-5 w-5 text-violet-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">
+                  将自动导入角色世界书
+                  {pendingCharacterBook.name && `「${pendingCharacterBook.name}」`}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  包含 {pendingCharacterBook.entryCount} 条词条，保存时将自动创建世界书并关联到该角色
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="shrink-0 h-7 text-muted-foreground hover:text-destructive"
+                onClick={() => setPendingCharacterBook(null)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
           <section className="space-y-4">
             <h2 className="text-base font-semibold">封面与头像</h2>
             <div

@@ -2,8 +2,6 @@
 
 import { useRef, useCallback } from "react";
 import { useChatStore } from "@/stores/chat-store";
-import { mockApi } from "@/lib/mock-api";
-import { USE_MOCK } from "@/lib/constants";
 import { api } from "@/lib/api-client";
 import { parseSSEStream } from "@/lib/sse-client";
 import type { ChatMessage } from "@/types/chat";
@@ -59,11 +57,6 @@ export function useChatStream(
       const controller = new AbortController();
       abortRef.current = controller;
 
-      if (USE_MOCK) {
-        await simulateMockStream(sessionId, controller.signal, tempId, userMsg);
-        return;
-      }
-
       try {
         const res = await api.stream(
           `/chat/sessions/${sessionId}/messages`,
@@ -86,9 +79,6 @@ export function useChatStream(
               if (isActive(sessionId)) {
                 finalizeStream(e.message);
                 onContextUsageUpdate?.(e.contextUsage);
-              } else {
-                // Stream finished in background — no UI update needed,
-                // server already persisted the message.
               }
             } else if (event.type === "error") {
               const e = event as SSEErrorEvent;
@@ -126,11 +116,6 @@ export function useChatStream(
       const controller = new AbortController();
       abortRef.current = controller;
 
-      if (USE_MOCK) {
-        await simulateMockStream(sessionId, controller.signal);
-        return;
-      }
-
       try {
         const res = await api.stream(
           `/chat/sessions/${sessionId}/regenerate`,
@@ -159,42 +144,6 @@ export function useChatStream(
     },
     [removeLastAssistant, setStreaming, finalizeStream, appendStreamContent, resetStream, onContextUsageUpdate],
   );
-
-  async function simulateMockStream(sessionId: string, signal: AbortSignal, tempId?: string, userMsg?: ChatMessage) {
-    const text = mockApi.getStreamingDemoText();
-    if (isActive(sessionId)) useChatStore.setState({ streamingContent: "" });
-
-    if (tempId && userMsg) {
-      const realUserMsg = { ...userMsg, id: `msg_${Date.now()}` };
-      if (isActive(sessionId)) replaceMessageId(tempId, realUserMsg);
-      mockApi.pushMessage(sessionId, realUserMsg);
-    }
-
-    let accumulated = "";
-    for (let i = 0; i < text.length; i++) {
-      if (signal.aborted) break;
-      accumulated += text[i];
-      if (isActive(sessionId)) useChatStore.setState({ streamingContent: accumulated });
-      const d = /[\s,，。！？\n]/.test(text[i]) ? 8 : 18;
-      await new Promise((r) => setTimeout(r, d));
-    }
-
-    if (signal.aborted) return;
-
-    const aiMsg: ChatMessage = {
-      id: `msg_${Date.now()}`,
-      role: "assistant",
-      content: accumulated,
-      tokenCount: Math.ceil(accumulated.length / 2),
-      isCompressed: false,
-      createdAt: new Date().toISOString(),
-      editedAt: null,
-    };
-    if (isActive(sessionId)) {
-      finalizeStream(aiMsg);
-    }
-    mockApi.pushMessage(sessionId, aiMsg);
-  }
 
   return { sendMessage, stopGeneration, regenerate };
 }

@@ -52,6 +52,7 @@ __C {
     __export void llaisysQwen3ModelSetCacheLen(struct LlaisysQwen3Model *model, size_t cache_len);
     __export size_t llaisysQwen3ModelGetCacheLen(struct LlaisysQwen3Model *model);
     __export void llaisysQwen3ModelSetProfile(struct LlaisysQwen3Model *model, int enabled);
+    __export void llaisysQwen3ModelSetRepetitionPenalty(struct LlaisysQwen3Model *model, float penalty);
 }
 
 #endif

@@ -8,6 +8,12 @@ export interface ChatMessage {
   editedAt: string | null;
 }
 
+export interface SamplingParams {
+  temperature: number | null;
+  topP: number | null;
+  topK: number | null;
+}
+
 export interface ChatSession {
   id: string;
   characterId: string;
@@ -22,6 +28,7 @@ export interface ChatSession {
     usedTokens: number;
     maxTokens: number;
   };
+  samplingParams: SamplingParams;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,4 +46,7 @@ export interface UpdateSessionInput {
   modelId?: string;
   personalWorldBookIds?: string[];
   title?: string;
+  temperature?: number | null;
+  topP?: number | null;
+  topK?: number | null;
 }

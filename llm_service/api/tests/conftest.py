@@ -40,7 +40,7 @@ class FakeQwen3:
     def __init__(self, tokens: list[int] | None = None):
         self.tokens = tokens or FAKE_TOKENS
         self.eos_token_id = 151643
-        self.max_seq_len = 8192
+        self.max_seq_len = 16384
         self._reset_count = 0
 
     def reset(self):
@@ -88,7 +88,7 @@ def model_config():
         id="test-model",
         name="Test Model",
         path="/tmp/fake-model",
-        max_seq_len=8192,
+        max_seq_len=16384,
         device="cpu",
         device_ids=[0],
         tp_size=1,

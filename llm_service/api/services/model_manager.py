@@ -88,7 +88,12 @@ class ModelManager:
             config.device_ids if config.tp_size > 1 else config.device_ids[0]
         )
 
-        model = llaisys.models.Qwen3(model_path, device, device_ids)
+        if config.model_type == "qwen3_5_moe":
+            model = llaisys.models.Qwen3_5Moe(model_path, device, config.device_ids[0])
+        elif config.model_type == "qwen3_5":
+            model = llaisys.models.Qwen3_5(model_path, device, config.device_ids[0])
+        else:
+            model = llaisys.models.Qwen3(model_path, device, device_ids)
         tokenizer = AutoTokenizer.from_pretrained(
             model_path, local_files_only=True
         )

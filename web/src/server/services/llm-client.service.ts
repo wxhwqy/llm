@@ -17,8 +17,19 @@ interface HealthResponse {
   queue: { active: number; waiting: number; max_concurrent: number };
 }
 
+export interface SamplingParams {
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+}
+
 let modelCache: { data: LLMModel[]; ts: number } | null = null;
 const MODEL_CACHE_TTL = 60_000;
+
+/** Normalize baseUrl: strip trailing slash and /v1 suffix so we can append /v1/... uniformly */
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "").replace(/\/v1$/, "");
+}
 
 export async function listModels(): Promise<LLMModel[]> {
   if (modelCache && Date.now() - modelCache.ts < MODEL_CACHE_TTL) {
@@ -56,7 +67,7 @@ export async function chatCompletion(
   provider?: { baseUrl: string; apiKey: string },
   timeout?: number,
 ): Promise<{ content: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
-  const baseUrl = provider?.baseUrl ?? config.llmServiceUrl;
+  const baseUrl = normalizeBaseUrl(provider?.baseUrl ?? config.llmServiceUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (provider?.apiKey) {
     headers["Authorization"] = `Bearer ${provider.apiKey}`;
@@ -94,8 +105,9 @@ export async function streamChatCompletion(
   signal?: AbortSignal,
   sessionId?: string,
   provider?: { baseUrl: string; apiKey: string },
+  sampling?: SamplingParams,
 ): Promise<Response> {
-  const baseUrl = provider?.baseUrl ?? config.llmServiceUrl;
+  const baseUrl = normalizeBaseUrl(provider?.baseUrl ?? config.llmServiceUrl);
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (provider?.apiKey) {
@@ -110,9 +122,10 @@ export async function streamChatCompletion(
         messages,
         stream: true,
         no_think: true,
-        temperature: config.defaultTemperature,
-        top_p: 0.95,
+        temperature: sampling?.temperature ?? config.defaultTemperature,
+        top_p: sampling?.topP ?? 0.95,
         max_tokens: config.defaultMaxTokens,
+        ...(sampling?.topK !== undefined && { top_k: sampling.topK }),
         ...(sessionId && { session_id: sessionId }),
       }),
       signal,

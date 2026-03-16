@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
 import { useCurrentUser } from "@/hooks/use-queries";
@@ -33,9 +34,11 @@ export function useAuthGuard() {
   const { data, isLoading } = useCurrentUser();
   const user = data?.data ?? null;
 
-  if (!isLoading && !user) {
-    router.replace("/login");
-  }
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.replace("/login");
+    }
+  }, [isLoading, user, router]);
 
   return { user, isLoading };
 }

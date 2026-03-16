@@ -119,6 +119,9 @@ model ChatSession {
   title       String @default("")
   usedTokens     Int     @default(0)
   maxTokens      Int     @default(8192)
+  temperature    Float?
+  topP           Float?
+  topK           Int?
   contextSummary String?
 
   messages       ChatMessage[]

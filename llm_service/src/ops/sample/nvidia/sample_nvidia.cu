@@ -57,7 +57,10 @@ __global__ void sample_kernel(
     float temperature,
     int top_k,
     float top_p,
-    uint64_t seed
+    uint64_t seed,
+    const int64_t *penalty_tokens,
+    size_t n_penalty_tokens,
+    float repetition_penalty
 ) {
     int tid = threadIdx.x;
     int nthreads = blockDim.x;
@@ -74,6 +77,28 @@ __global__ void sample_kernel(
         local_max = fmaxf(local_max, v);
     }
     float global_max = block_reduce_max(local_max, s_f);
+
+    // Apply repetition penalty after temperature scaling, before softmax
+    if (repetition_penalty != 1.0f && n_penalty_tokens > 0) {
+        for (size_t i = tid; i < n_penalty_tokens; i += nthreads) {
+            int64_t token_id = penalty_tokens[i];
+            if (token_id >= 0 && (size_t)token_id < vocab_size) {
+                float &logit = probs[token_id];
+                if (logit > 0.0f) {
+                    logit /= repetition_penalty;
+                } else {
+                    logit *= repetition_penalty;
+                }
+            }
+        }
+        __syncthreads();
+        // Recompute max after penalty
+        local_max = -FLT_MAX;
+        for (size_t i = tid; i < vocab_size; i += nthreads) {
+            local_max = fmaxf(local_max, probs[i]);
+        }
+        global_max = block_reduce_max(local_max, s_f);
+    }
 
     // Phase 2: exp + sum
     float local_sum = 0.0f;
@@ -173,27 +198,43 @@ __global__ void sample_kernel(
 namespace llaisys::ops::nvidia {
 void sample(std::byte *output_idx, const std::byte *logits, std::byte *workspace,
             llaisysDataType_t dtype, size_t vocab_size,
-            float temperature, int top_k, float top_p, uint64_t seed) {
+            float temperature, int top_k, float top_p, uint64_t seed,
+            const int64_t *penalty_tokens_host, size_t n_penalty_tokens,
+            float repetition_penalty) {
     float *probs = reinterpret_cast<float *>(workspace);
+
+    // Copy penalty tokens to device if needed
+    int64_t *d_penalty = nullptr;
+    if (repetition_penalty != 1.0f && n_penalty_tokens > 0 && penalty_tokens_host) {
+        cudaMalloc(&d_penalty, n_penalty_tokens * sizeof(int64_t));
+        cudaMemcpy(d_penalty, penalty_tokens_host,
+                   n_penalty_tokens * sizeof(int64_t), cudaMemcpyHostToDevice);
+    }
+
     switch (dtype) {
     case LLAISYS_DTYPE_F32:
         sample_kernel<<<1, BLOCK_SIZE>>>(
             (int64_t *)output_idx, (const float *)logits, probs,
-            vocab_size, temperature, top_k, top_p, seed);
+            vocab_size, temperature, top_k, top_p, seed,
+            d_penalty, n_penalty_tokens, repetition_penalty);
         break;
     case LLAISYS_DTYPE_F16:
         sample_kernel<<<1, BLOCK_SIZE>>>(
             (int64_t *)output_idx, (const __half *)logits, probs,
-            vocab_size, temperature, top_k, top_p, seed);
+            vocab_size, temperature, top_k, top_p, seed,
+            d_penalty, n_penalty_tokens, repetition_penalty);
         break;
     case LLAISYS_DTYPE_BF16:
         sample_kernel<<<1, BLOCK_SIZE>>>(
             (int64_t *)output_idx, (const __nv_bfloat16 *)logits, probs,
-            vocab_size, temperature, top_k, top_p, seed);
+            vocab_size, temperature, top_k, top_p, seed,
+            d_penalty, n_penalty_tokens, repetition_penalty);
         break;
     default:
+        if (d_penalty) cudaFree(d_penalty);
         throw std::runtime_error("Unsupported dtype for CUDA sample");
     }
     CUDA_KERNEL_CHECK();
+    if (d_penalty) cudaFree(d_penalty);
 }
 } // namespace llaisys::ops::nvidia

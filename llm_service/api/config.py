@@ -18,7 +18,8 @@ class ModelConfig:
     id: str
     name: str
     path: str
-    max_seq_len: int = 8192
+    model_type: str = "qwen3"  # "qwen3", "qwen3_5", or "qwen3_5_moe"
+    max_seq_len: int = 16384
     device: str = "nvidia"
     device_ids: list[int] = field(default_factory=lambda: [0, 1])
     tp_size: int = 2
@@ -85,7 +86,7 @@ def _default_model_config() -> ModelConfig:
         id=os.getenv("LLM_DEFAULT_MODEL", "qwen3-32b"),
         name="Qwen3 32B (FP8)",
         path=model_path,
-        max_seq_len=int(os.getenv("LLM_MAX_SEQ_LEN", "8192")),
+        max_seq_len=int(os.getenv("LLM_MAX_SEQ_LEN", "16384")),
         device=device,
         device_ids=device_ids,
         tp_size=tp_size,

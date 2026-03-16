@@ -75,19 +75,13 @@ static void self_attention_f32_avx2(float *attn_val, const float *q, const float
                 scores[ki] = -std::numeric_limits<float>::infinity();
             }
 
-            // Softmax with AVX2
-            __m256 vsum_exp = _mm256_setzero_ps();
+            // Softmax: subtract max with AVX2
             __m256 vmax = _mm256_set1_ps(max_score);
-            __m256 neg_inf_half = _mm256_set1_ps(-std::numeric_limits<float>::infinity() / 2);
 
             size_t ki = 0;
             for (; ki + 8 <= kvlen; ki += 8) {
                 __m256 vs = _mm256_loadu_ps(scores.data() + ki);
-                // Mask: scores > -inf/2
-                __m256 mask = _mm256_cmp_ps(vs, neg_inf_half, _CMP_GT_OQ);
                 __m256 shifted = _mm256_sub_ps(vs, vmax);
-                // For exp, we just store shifted values and compute exp below
-                // (approximate exp is available but for softmax accuracy, use scalar)
                 _mm256_storeu_ps(scores.data() + ki, shifted);
             }
             for (; ki < kvlen; ki++) {
@@ -211,6 +205,34 @@ static void self_attention_scalar(T *attn_val, const T *q, const T *k, const T *
     }
 }
 
+// Gated attention: compute self_attention then apply sigmoid(gate) elementwise
+template <typename T>
+static void self_attention_gated_scalar(T *attn_val, const T *q, const T *k, const T *v,
+                                         const T *gate, float scale, size_t qlen, size_t kvlen,
+                                         size_t nhead, size_t nkvhead, size_t hd) {
+    // First compute normal attention
+    self_attention_scalar(attn_val, q, k, v, scale, qlen, kvlen, nhead, nkvhead, hd);
+    // Then apply sigmoid gate
+    size_t total = qlen * nhead * hd;
+    for (size_t i = 0; i < total; i++) {
+        float a, g;
+        if constexpr (std::is_same_v<T, llaisys::bf16_t> || std::is_same_v<T, llaisys::fp16_t>) {
+            a = llaisys::utils::cast<float>(attn_val[i]);
+            g = llaisys::utils::cast<float>(gate[i]);
+        } else {
+            a = static_cast<float>(attn_val[i]);
+            g = static_cast<float>(gate[i]);
+        }
+        float sig = 1.0f / (1.0f + std::exp(-g));
+        float result = a * sig;
+        if constexpr (std::is_same_v<T, llaisys::bf16_t> || std::is_same_v<T, llaisys::fp16_t>) {
+            attn_val[i] = llaisys::utils::cast<T>(result);
+        } else {
+            attn_val[i] = static_cast<T>(result);
+        }
+    }
+}
+
 namespace llaisys::ops::cpu {
 void self_attention(std::byte *attn_val_ptr, const std::byte *q_ptr, const std::byte *k_ptr,
                     const std::byte *v_ptr, float scale, llaisysDataType_t dtype,
@@ -242,6 +264,37 @@ void self_attention(std::byte *attn_val_ptr, const std::byte *q_ptr, const std::
                                      reinterpret_cast<const fp16_t *>(k_ptr),
                                      reinterpret_cast<const fp16_t *>(v_ptr),
                                      scale, qlen, kvlen, nhead, nkvhead, hd);
+    default:
+        EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
+    }
+}
+
+void self_attention_gated(std::byte *attn_val_ptr, const std::byte *q_ptr, const std::byte *k_ptr,
+                          const std::byte *v_ptr, const std::byte *gate_ptr, float scale,
+                          llaisysDataType_t dtype,
+                          size_t qlen, size_t kvlen, size_t nhead, size_t nkvhead, size_t hd) {
+    switch (dtype) {
+    case LLAISYS_DTYPE_F32:
+        return self_attention_gated_scalar(reinterpret_cast<float *>(attn_val_ptr),
+                                            reinterpret_cast<const float *>(q_ptr),
+                                            reinterpret_cast<const float *>(k_ptr),
+                                            reinterpret_cast<const float *>(v_ptr),
+                                            reinterpret_cast<const float *>(gate_ptr),
+                                            scale, qlen, kvlen, nhead, nkvhead, hd);
+    case LLAISYS_DTYPE_BF16:
+        return self_attention_gated_scalar(reinterpret_cast<bf16_t *>(attn_val_ptr),
+                                            reinterpret_cast<const bf16_t *>(q_ptr),
+                                            reinterpret_cast<const bf16_t *>(k_ptr),
+                                            reinterpret_cast<const bf16_t *>(v_ptr),
+                                            reinterpret_cast<const bf16_t *>(gate_ptr),
+                                            scale, qlen, kvlen, nhead, nkvhead, hd);
+    case LLAISYS_DTYPE_F16:
+        return self_attention_gated_scalar(reinterpret_cast<fp16_t *>(attn_val_ptr),
+                                            reinterpret_cast<const fp16_t *>(q_ptr),
+                                            reinterpret_cast<const fp16_t *>(k_ptr),
+                                            reinterpret_cast<const fp16_t *>(v_ptr),
+                                            reinterpret_cast<const fp16_t *>(gate_ptr),
+                                            scale, qlen, kvlen, nhead, nkvhead, hd);
     default:
         EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }

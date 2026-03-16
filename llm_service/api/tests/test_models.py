@@ -18,7 +18,7 @@ async def test_list_models_structure(client):
     model = data["data"][0]
     assert model["id"] == "test-model"
     assert model["name"] == "Test Model"
-    assert model["max_context_length"] == 8192
+    assert model["max_context_length"] == 16384
     assert model["status"] == "loaded"
     assert model["object"] == "model"
     assert model["owned_by"] == "llaisys"

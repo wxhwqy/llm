@@ -77,7 +77,9 @@ static void softmax_f32(float *data, size_t n) {
 template <typename T>
 static void sample_impl(int64_t *output_idx, const T *logits, float *workspace,
                          size_t vocab_size, float temperature, int top_k, float top_p,
-                         uint64_t seed) {
+                         uint64_t seed,
+                         const int64_t *penalty_tokens, size_t n_penalty_tokens,
+                         float repetition_penalty) {
     // Convert logits to float workspace with temperature scaling
     float inv_temp = 1.0f / temperature;
 
@@ -98,6 +100,22 @@ static void sample_impl(int64_t *output_idx, const T *logits, float *workspace,
                 val = static_cast<float>(logits[i]);
             }
             workspace[i] = val * inv_temp;
+        }
+    }
+
+    // Apply repetition penalty: penalize tokens that appeared in history
+    if (repetition_penalty != 1.0f && n_penalty_tokens > 0) {
+        for (size_t i = 0; i < n_penalty_tokens; i++) {
+            int64_t tid = penalty_tokens[i];
+            if (tid >= 0 && static_cast<size_t>(tid) < vocab_size) {
+                float &logit = workspace[tid];
+                // If logit > 0, divide by penalty; if logit < 0, multiply by penalty
+                if (logit > 0.0f) {
+                    logit /= repetition_penalty;
+                } else {
+                    logit *= repetition_penalty;
+                }
+            }
         }
     }
 
@@ -153,20 +171,25 @@ static void sample_impl(int64_t *output_idx, const T *logits, float *workspace,
 namespace llaisys::ops::cpu {
 void sample(std::byte *output_idx_ptr, const std::byte *logits_ptr, std::byte *workspace_ptr,
             llaisysDataType_t dtype, size_t vocab_size,
-            float temperature, int top_k, float top_p, uint64_t seed) {
+            float temperature, int top_k, float top_p, uint64_t seed,
+            const int64_t *penalty_tokens, size_t n_penalty_tokens,
+            float repetition_penalty) {
     int64_t *output_idx = reinterpret_cast<int64_t *>(output_idx_ptr);
     float *workspace = reinterpret_cast<float *>(workspace_ptr);
 
     switch (dtype) {
     case LLAISYS_DTYPE_F32:
         return sample_impl(output_idx, reinterpret_cast<const float *>(logits_ptr),
-                           workspace, vocab_size, temperature, top_k, top_p, seed);
+                           workspace, vocab_size, temperature, top_k, top_p, seed,
+                           penalty_tokens, n_penalty_tokens, repetition_penalty);
     case LLAISYS_DTYPE_BF16:
         return sample_impl(output_idx, reinterpret_cast<const bf16_t *>(logits_ptr),
-                           workspace, vocab_size, temperature, top_k, top_p, seed);
+                           workspace, vocab_size, temperature, top_k, top_p, seed,
+                           penalty_tokens, n_penalty_tokens, repetition_penalty);
     case LLAISYS_DTYPE_F16:
         return sample_impl(output_idx, reinterpret_cast<const fp16_t *>(logits_ptr),
-                           workspace, vocab_size, temperature, top_k, top_p, seed);
+                           workspace, vocab_size, temperature, top_k, top_p, seed,
+                           penalty_tokens, n_penalty_tokens, repetition_penalty);
     default:
         EXCEPTION_UNSUPPORTED_DATATYPE(dtype);
     }

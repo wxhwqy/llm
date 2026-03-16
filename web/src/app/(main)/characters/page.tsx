@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Upload, Plus, Sparkles, Tag, FileImage, FileJson, Loader2 } from "lucide-react";
+import { Search, Upload, Plus, Sparkles, Tag, FileImage, FileJson, Loader2, BookOpen } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -70,12 +71,12 @@ function CharacterCardItem({ character }: { character: CharacterSummary }) {
           {stripHtml(character.personality)}
         </p>
         <div className="flex items-end gap-1">
-          <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+          <div className="flex gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none">
             {character.tags.map((tag) => (
               <Badge
                 key={tag}
                 variant="secondary"
-                className="text-[10px] px-1.5 py-0 h-5"
+                className="text-[10px] px-1.5 py-0 h-5 shrink-0"
               >
                 {tag}
               </Badge>
@@ -131,13 +132,28 @@ export default function CharactersPage() {
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [worldBookPrompt, setWorldBookPrompt] = useState<{
+    entryCount: number;
+    bookName: string | null;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const setImportData = useImportStore((s) => s.setData);
+  const pendingImportData = useRef<Parameters<typeof setImportData>[0] | null>(null);
 
   const acceptMap: Record<ImportType, string> = {
     sillytavern_png: ".png",
     json_import: ".json",
   };
+
+  const proceedToEdit = useCallback(() => {
+    if (pendingImportData.current) {
+      setImportData(pendingImportData.current);
+      pendingImportData.current = null;
+    }
+    setWorldBookPrompt(null);
+    setImportOpen(false);
+    router.push("/characters/new/edit");
+  }, [setImportData, router]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -148,9 +164,18 @@ export default function CharactersPage() {
           importType === "sillytavern_png"
             ? await parseCharacterPng(file)
             : await parseCharacterJson(file);
-        setImportData(data);
-        setImportOpen(false);
-        router.push("/characters/new/edit");
+        if (data.characterBook) {
+          pendingImportData.current = data;
+          setImportOpen(false);
+          setWorldBookPrompt({
+            entryCount: data.characterBook.entryCount,
+            bookName: data.characterBook.name,
+          });
+        } else {
+          setImportData(data);
+          setImportOpen(false);
+          router.push("/characters/new/edit");
+        }
       } catch (err) {
         setImportError(
           err instanceof Error ? err.message : "文件解析失败",
@@ -338,6 +363,54 @@ export default function CharactersPage() {
               <p className="text-sm text-destructive">{importError}</p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---- World Book Detected Dialog ---- */}
+      <Dialog
+        open={worldBookPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWorldBookPrompt(null);
+            pendingImportData.current = null;
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-violet-500" />
+              检测到角色世界书
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              该角色卡包含
+              {worldBookPrompt?.bookName && (
+                <span>世界书「<strong className="text-foreground">{worldBookPrompt.bookName}</strong>」，共 </span>
+              )}
+              {!worldBookPrompt?.bookName && "世界书，共 "}
+              <strong className="text-foreground">{worldBookPrompt?.entryCount ?? 0}</strong>
+              {" "}条词条。
+            </p>
+            <p className="text-sm text-muted-foreground">
+              保存角色后将自动创建世界书并关联到该角色，聊天时会根据关键词自动注入世界观设定。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              // Discard character book, proceed without it
+              if (pendingImportData.current) {
+                pendingImportData.current.characterBook = null;
+              }
+              proceedToEdit();
+            }}>
+              不导入世界书
+            </Button>
+            <Button onClick={proceedToEdit}>
+              确定
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

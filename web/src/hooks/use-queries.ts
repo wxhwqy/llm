@@ -1,13 +1,11 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { mockApi } from "@/lib/mock-api";
-import { USE_MOCK } from "@/lib/constants";
 import { api } from "@/lib/api-client";
 import type { PaginatedResponse, ApiResponse, CursorResponse } from "@/types/api";
 import type { CharacterCard, CharacterSummary } from "@/types/character";
 import type { ChatSession, ChatMessage } from "@/types/chat";
-import type { WorldBookSummary, WorldBookDetail } from "@/types/worldbook";
+import type { WorldBookSummary, WorldBookDetail, WorldBookCreateInput, EntryCreateInput } from "@/types/worldbook";
 import type { User, AdminUserItem, TokenUsageStats, ModelInfo } from "@/types/user";
 import { useAuthStore } from "@/stores/auth-store";
 
@@ -17,9 +15,7 @@ export function useCurrentUser() {
     queryKey: ["auth", "me"],
     queryFn: async () => {
       try {
-        const res = USE_MOCK
-          ? await mockApi.getMe()
-          : await api.get<ApiResponse<User>>("/auth/me");
+        const res = await api.get<ApiResponse<User>>("/auth/me");
         setUser(res.data);
         return res;
       } catch {
@@ -36,7 +32,6 @@ export function useCharacters(params?: { search?: string; tags?: string[] }) {
   return useQuery({
     queryKey: ["characters", params],
     queryFn: () => {
-      if (USE_MOCK) return mockApi.getCharacters(params ? { search: params.search, tag: params.tags } : undefined);
       const sp = new URLSearchParams();
       if (params?.search) sp.set("search", params.search);
       params?.tags?.forEach((t) => sp.append("tag", t));
@@ -48,10 +43,7 @@ export function useCharacters(params?: { search?: string; tags?: string[] }) {
 export function useCharacter(id: string) {
   return useQuery({
     queryKey: ["character", id],
-    queryFn: () =>
-      USE_MOCK
-        ? mockApi.getCharacter(id)
-        : api.get<ApiResponse<CharacterCard>>(`/characters/${id}`),
+    queryFn: () => api.get<ApiResponse<CharacterCard>>(`/characters/${id}`),
     enabled: !!id,
   });
 }
@@ -59,8 +51,7 @@ export function useCharacter(id: string) {
 export function useCharacterTags() {
   return useQuery({
     queryKey: ["characters", "tags"],
-    queryFn: () =>
-      USE_MOCK ? mockApi.getTags() : api.get<ApiResponse<string[]>>("/characters/tags"),
+    queryFn: () => api.get<ApiResponse<string[]>>("/characters/tags"),
     staleTime: 60_000,
   });
 }
@@ -68,10 +59,7 @@ export function useCharacterTags() {
 export function useSessions() {
   return useQuery({
     queryKey: ["chat", "sessions"],
-    queryFn: () =>
-      USE_MOCK
-        ? mockApi.getSessions()
-        : api.get<PaginatedResponse<ChatSession>>("/chat/sessions"),
+    queryFn: () => api.get<PaginatedResponse<ChatSession>>("/chat/sessions"),
     staleTime: 10_000,
   });
 }
@@ -80,9 +68,7 @@ export function useMessages(sessionId: string) {
   return useQuery({
     queryKey: ["chat", "messages", sessionId],
     queryFn: () =>
-      USE_MOCK
-        ? mockApi.getMessages(sessionId)
-        : api.get<CursorResponse<ChatMessage>>(`/chat/sessions/${sessionId}/messages?limit=50`),
+      api.get<CursorResponse<ChatMessage>>(`/chat/sessions/${sessionId}/messages?limit=50`),
     enabled: !!sessionId,
   });
 }
@@ -91,7 +77,6 @@ export function useWorldBooks(scope?: string) {
   return useQuery({
     queryKey: ["worldbooks", scope],
     queryFn: () => {
-      if (USE_MOCK) return mockApi.getWorldBooks(scope);
       const sp = scope ? `?scope=${scope}` : "";
       return api.get<PaginatedResponse<WorldBookSummary>>(`/worldbooks${sp}`);
     },
@@ -101,11 +86,95 @@ export function useWorldBooks(scope?: string) {
 export function useWorldBook(id: string) {
   return useQuery({
     queryKey: ["worldbook", id],
-    queryFn: () =>
-      USE_MOCK
-        ? mockApi.getWorldBook(id)
-        : api.get<ApiResponse<WorldBookDetail>>(`/worldbooks/${id}`),
+    queryFn: () => api.get<ApiResponse<WorldBookDetail>>(`/worldbooks/${id}`),
     enabled: !!id,
+  });
+}
+
+// ─── Worldbook Mutations ──────────────────────────────
+
+export function useCreateWorldBook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: WorldBookCreateInput) =>
+      api.post<ApiResponse<WorldBookDetail>>("/worldbooks", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["worldbooks"] });
+    },
+  });
+}
+
+export function useUpdateWorldBook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name?: string; description?: string }) =>
+      api.put<ApiResponse<WorldBookDetail>>(`/worldbooks/${id}`, data),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["worldbooks"] });
+      queryClient.invalidateQueries({ queryKey: ["worldbook", variables.id] });
+    },
+  });
+}
+
+export function useDeleteWorldBook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete<ApiResponse<{ deleted: true }>>(`/worldbooks/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["worldbooks"] });
+    },
+  });
+}
+
+export function useImportWorldBook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return api.upload<ApiResponse<WorldBookDetail>>("/worldbooks/import", fd);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["worldbooks"] });
+    },
+  });
+}
+
+export function useCreateWorldBookEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ worldBookId, ...data }: EntryCreateInput & { worldBookId: string }) =>
+      api.post<ApiResponse<{ id: string }>>(`/worldbooks/${worldBookId}/entries`, data),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["worldbook", variables.worldBookId] });
+    },
+  });
+}
+
+export function useUpdateWorldBookEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      worldBookId,
+      entryId,
+      ...data
+    }: Partial<EntryCreateInput> & { worldBookId: string; entryId: string }) =>
+      api.put<ApiResponse<{ success: true }>>(`/worldbooks/${worldBookId}/entries/${entryId}`, data),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["worldbook", variables.worldBookId] });
+    },
+  });
+}
+
+export function useDeleteWorldBookEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ worldBookId, entryId }: { worldBookId: string; entryId: string }) =>
+      api.delete<ApiResponse<{ deleted: true }>>(`/worldbooks/${worldBookId}/entries/${entryId}`),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["worldbook", variables.worldBookId] });
+    },
   });
 }
 
@@ -149,25 +218,6 @@ export function useCreateCharacter() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: CharacterMutationPayload) => {
-      if (USE_MOCK) {
-        return mockApi.createCharacter({
-          name: payload.name,
-          description: payload.description,
-          personality: payload.personality,
-          preset: payload.preset,
-          scenario: payload.scenario,
-          systemPrompt: payload.systemPrompt,
-          firstMessage: payload.firstMessage,
-          alternateGreetings: [],
-          exampleDialogue: payload.exampleDialogue,
-          creatorNotes: payload.creatorNotes,
-          source: payload.source as CharacterCard["source"],
-          tags: payload.tags,
-          worldBookIds: payload.worldBookIds,
-          avatar: null,
-          coverImage: payload.coverImageDataUrl ?? null,
-        });
-      }
       const fd = buildCharacterFormData(payload);
       return api.upload<ApiResponse<CharacterCard>>("/admin/characters", fd);
     },
@@ -181,23 +231,6 @@ export function useUpdateCharacter() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...payload }: CharacterMutationPayload & { id: string }) => {
-      if (USE_MOCK) {
-        return mockApi.updateCharacter(id, {
-          name: payload.name,
-          description: payload.description,
-          personality: payload.personality,
-          preset: payload.preset,
-          scenario: payload.scenario,
-          systemPrompt: payload.systemPrompt,
-          firstMessage: payload.firstMessage,
-          exampleDialogue: payload.exampleDialogue,
-          creatorNotes: payload.creatorNotes,
-          source: payload.source as CharacterCard["source"],
-          tags: payload.tags,
-          worldBookIds: payload.worldBookIds,
-          coverImage: payload.coverImageDataUrl ?? null,
-        });
-      }
       const fd = buildCharacterFormData(payload);
       return api.uploadPut<ApiResponse<CharacterCard>>(`/admin/characters/${id}`, fd);
     },
@@ -212,9 +245,7 @@ export function useDeleteCharacter() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      USE_MOCK
-        ? mockApi.deleteCharacter(id)
-        : api.delete<ApiResponse<{ deleted: true }>>(`/admin/characters/${id}`),
+      api.delete<ApiResponse<{ deleted: true }>>(`/admin/characters/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["characters"] });
     },
@@ -225,12 +256,27 @@ export function useCreateSession() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (characterId: string) =>
-      USE_MOCK
-        ? mockApi.createSession(characterId)
-        : api.post<ApiResponse<ChatSession & { messages: ChatMessage[] }>>(
-            "/chat/sessions",
-            { characterId },
-          ),
+      api.post<ApiResponse<ChatSession & { messages: ChatMessage[] }>>(
+        "/chat/sessions",
+        { characterId },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chat", "sessions"] });
+    },
+  });
+}
+
+export function useDeleteSessions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      await Promise.all(
+        ids.map((id) =>
+          api.delete<ApiResponse<{ deleted: true }>>(`/chat/sessions/${id}`),
+        ),
+      );
+      return { data: { success: true as const } };
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat", "sessions"] });
     },
@@ -240,8 +286,7 @@ export function useCreateSession() {
 export function useModels() {
   return useQuery({
     queryKey: ["models"],
-    queryFn: () =>
-      USE_MOCK ? mockApi.getModels() : api.get<ApiResponse<ModelInfo[]>>("/models"),
+    queryFn: () => api.get<ApiResponse<ModelInfo[]>>("/models"),
     staleTime: 300_000,
   });
 }
@@ -249,8 +294,7 @@ export function useModels() {
 export function useTokenUsage() {
   return useQuery({
     queryKey: ["usage"],
-    queryFn: () =>
-      USE_MOCK ? mockApi.getUsage() : api.get<ApiResponse<TokenUsageStats>>("/users/me/usage"),
+    queryFn: () => api.get<ApiResponse<TokenUsageStats>>("/users/me/usage"),
     staleTime: 60_000,
   });
 }
@@ -262,9 +306,7 @@ export function useLogin() {
   const setUser = useAuthStore((s) => s.setUser);
   return useMutation({
     mutationFn: (data: { email: string; password: string }) =>
-      USE_MOCK
-        ? mockApi.login(data.email, data.password)
-        : api.post<ApiResponse<{ user: User }>>("/auth/login", data),
+      api.post<ApiResponse<{ user: User }>>("/auth/login", data),
     onSuccess: (res) => {
       queryClient.clear();
       setUser(res.data.user);
@@ -278,9 +320,7 @@ export function useRegister() {
   const setUser = useAuthStore((s) => s.setUser);
   return useMutation({
     mutationFn: (data: { username: string; email: string; password: string }) =>
-      USE_MOCK
-        ? mockApi.register(data.username, data.email, data.password)
-        : api.post<ApiResponse<{ user: User }>>("/auth/register", data),
+      api.post<ApiResponse<{ user: User }>>("/auth/register", data),
     onSuccess: (res) => {
       queryClient.clear();
       setUser(res.data.user);
@@ -294,9 +334,7 @@ export function useLogout() {
   const setUser = useAuthStore((s) => s.setUser);
   return useMutation({
     mutationFn: () =>
-      USE_MOCK
-        ? mockApi.logout()
-        : api.post<ApiResponse<{ success: true }>>("/auth/logout"),
+      api.post<ApiResponse<{ success: true }>>("/auth/logout"),
     onSuccess: () => {
       setUser(null);
       queryClient.clear();
@@ -309,9 +347,7 @@ export function useUpdateProfile() {
   const setUser = useAuthStore((s) => s.setUser);
   return useMutation({
     mutationFn: (data: { username?: string; email?: string }) =>
-      USE_MOCK
-        ? mockApi.updateProfile(data)
-        : api.put<ApiResponse<User>>("/users/me", data),
+      api.put<ApiResponse<User>>("/users/me", data),
     onSuccess: (res) => {
       setUser(res.data);
       queryClient.setQueryData(["auth", "me"], { data: res.data });
@@ -322,9 +358,7 @@ export function useUpdateProfile() {
 export function useChangePassword() {
   return useMutation({
     mutationFn: (data: { oldPassword: string; newPassword: string }) =>
-      USE_MOCK
-        ? mockApi.changePassword()
-        : api.put<ApiResponse<{ success: true }>>("/users/me/password", data),
+      api.put<ApiResponse<{ success: true }>>("/users/me/password", data),
   });
 }
 

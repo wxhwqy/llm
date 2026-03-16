@@ -14,6 +14,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <unordered_set>
 
 #include "../utils/profiler.hpp"
 
@@ -77,6 +78,11 @@ private:
     std::vector<std::vector<tensor_t>> kv_cache_;
     size_t cache_len_;
 
+    // Repetition penalty
+    float repetition_penalty_ = 1.0f;
+    std::vector<int64_t> token_history_;
+    void applyRepetitionPenalty(tensor_t logits, size_t vocab_size);
+
     // Temporary buffers
     tensor_t hidden_states_;
     tensor_t residual_;
@@ -116,6 +122,7 @@ public:
     void resetCache();
     void setCacheLen(size_t len);
     size_t cacheLen() const { return cache_len_; }
+    void setRepetitionPenalty(float penalty) { repetition_penalty_ = penalty; }
 
     int64_t infer(const int64_t *token_ids, size_t num_tokens,
                   float temperature = 0.0f, int top_k = 0, float top_p = 1.0f,
