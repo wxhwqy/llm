@@ -253,7 +253,7 @@ class Qwen3:
         top_p: float = 0.8,
         temperature: float = 0.8,
         reuse_cache: bool = False,
-        repetition_penalty: float = 1.2,
+        repetition_penalty: float = 1.05,
     ):
         """Non-streaming generate: returns full token list."""
         return list(self.stream_generate(
