@@ -580,7 +580,7 @@ export default function ChatSessionPage({
       await api.put(`/chat/sessions/${sessionId}/messages/${id}`, { content });
     } catch {
       // Revert on failure — reload from server
-      const fresh = await api.get(`/chat/sessions/${sessionId}/messages`);
+      const fresh = (await api.get(`/chat/sessions/${sessionId}/messages`)) as { data: ChatMessage[] };
       useChatStore.getState().setMessages(fresh.data);
     }
   };
