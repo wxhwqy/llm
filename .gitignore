@@ -20,6 +20,7 @@ __pycache__/
 *.egg-info/
 *.egg
 dist/
+.pytest_cache/
 llm_service/python/build/
 llm_service/python/llaisys.egg-info/
 
