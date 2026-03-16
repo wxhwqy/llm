@@ -34,7 +34,7 @@ elif [[ -f "${MIGRATION_DIR}/repo.bundle" ]]; then
     read -p "输入项目安装路径 (默认: ${HOME}/llm): " TARGET_DIR
     TARGET_DIR="${TARGET_DIR:-${HOME}/llm}"
 else
-    TARGET_DIR="$(dirname "${SCRIPT_DIR}")"
+    TARGET_DIR="$(dirname "$(dirname "${SCRIPT_DIR}")")"
 fi
 info "项目目标路径: ${TARGET_DIR}"
 
@@ -268,5 +268,5 @@ info "启动前端:"
 echo "    cd ${TARGET_DIR}/web && npm run dev"
 echo ""
 info "运行验证脚本:"
-echo "    bash ${TARGET_DIR}/scripts/migrate-verify.sh"
+echo "    bash ${TARGET_DIR}/web/scripts/migrate-verify.sh"
 echo ""

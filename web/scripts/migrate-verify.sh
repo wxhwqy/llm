@@ -16,7 +16,7 @@ fail() { echo -e "  ${RED}✗${NC} $*"; ((FAIL++)); }
 skip() { echo -e "  ${YELLOW}!${NC} $*"; ((WARN++)); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 echo "============================================"
 echo "  LLM 项目迁移 - 验证检查"
